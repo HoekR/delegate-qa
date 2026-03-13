@@ -19,6 +19,7 @@ def render(
     MIN_AGE: int,
     MAX_AGE: int,
     save_correction: Callable,
+    corrected_indices: set = frozenset(),
 ) -> None:
     with tab:
         st.title("🧬 Alive Check")
@@ -83,7 +84,12 @@ def render(
             "flag_young", "flag_old", "flag_dead", "flag_before_active", "flag_after_active",
         ] if c in df_alive.columns]
         flagged_reset1 = flagged[show_cols].reset_index(names="_orig_idx")
-        st.caption("Click rows to select them, then bulk-reassign below.")
+        _n_done1 = flagged_reset1["_orig_idx"].isin(corrected_indices).sum()
+        if _n_done1:
+            flagged_reset1 = flagged_reset1[~flagged_reset1["_orig_idx"].isin(corrected_indices)]
+            st.caption(f"{_n_done1} already-corrected row(s) hidden. Click rows to select them, then bulk-reassign below.")
+        else:
+            st.caption("Click rows to select them, then bulk-reassign below.")
         sel1 = st.dataframe(flagged_reset1, width="stretch", height=300,
                             on_select="rerun", selection_mode="multi-row")
         selected_rows1 = sel1.selection.rows if sel1 and sel1.selection else []
@@ -108,4 +114,5 @@ def render(
                 orig_indices = flagged_reset1.iloc[selected_rows1]["_orig_idx"].tolist()
                 for ridx in orig_indices:
                     save_correction(ridx, nid1.strip())
-                st.success(f"Saved {len(orig_indices)} correction(s): → {nid1.strip()}")
+                st.toast(f"Saved {len(orig_indices)} correction(s): → {nid1.strip()}", icon="✅")
+                st.rerun()

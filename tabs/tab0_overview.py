@@ -29,6 +29,7 @@ def render(
     sandboxed: set[str],
     reviewed: set[str] | None = None,
     corrected_delegate_ids: set[str] | None = None,
+    debug: bool = False,
 ) -> None:
     with tab:
         st.title("👥 Delegate QA — Overview")
@@ -166,7 +167,7 @@ def render(
         gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=25)
         grid_opts = gb.build()
 
-        print(f"  tab0 GridOptionsBuilder        {(_t.perf_counter()-_t0)*1000:8.1f} ms  rows={len(summary_disp)}")
+        if debug: print(f"  tab0 GridOptionsBuilder        {(_t.perf_counter()-_t0)*1000:8.1f} ms  rows={len(summary_disp)}")
         _t0 = _t.perf_counter()
         response = AgGrid(
             summary_disp,
@@ -177,7 +178,7 @@ def render(
             allow_unsafe_jscode=False,
             key="tab0_aggrid",
         )
-        print(f"  tab0 AgGrid()                  {(_t.perf_counter()-_t0)*1000:8.1f} ms")
+        if debug: print(f"  tab0 AgGrid()                  {(_t.perf_counter()-_t0)*1000:8.1f} ms")
 
         # Resolve selected rows (list-of-dicts in 0.3.x; DataFrame in 1.x)
         raw_sel = response.get("selected_rows", [])

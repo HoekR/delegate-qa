@@ -11,6 +11,7 @@ Run:
 from __future__ import annotations
 
 import io
+import os
 
 import pandas as pd
 import streamlit as st
@@ -50,6 +51,12 @@ from tabs import (
     tab4_timeline,
     tab6_management,
 )
+# ---------------------------------------------------------------------------
+# DEBUG FLAG  — set env var to enable timing output in the terminal
+#   DELEGATE_QA_DEBUG=1 streamlit run sheet.py
+# ---------------------------------------------------------------------------
+DEBUG: bool = os.getenv("DELEGATE_QA_DEBUG", "0") == "1"
+
 # ---------------------------------------------------------------------------
 # PAGE CONFIG
 # ---------------------------------------------------------------------------
@@ -97,12 +104,15 @@ if "startup_logged" not in st.session_state:
     st.session_state["startup_logged"] = True
 
 def _timed(name, fn):
+    if not DEBUG:
+        return fn()
     _t0 = _time.perf_counter()
     result = fn()
     print(f"  {name:<32} {(_time.perf_counter()-_t0)*1000:8.1f} ms")
     return result
 
-print(f"--- rerun {_time.strftime('%H:%M:%S')} sel={st.session_state.get('sel_delegate_id')} ---")
+if DEBUG:
+    print(f"--- rerun {_time.strftime('%H:%M:%S')} sel={st.session_state.get('sel_delegate_id')} ---")
 
 try:
     df_p, df_i, df_abbrd = _timed("load_data()", lambda: load_data(source_mtimes()))
@@ -175,10 +185,51 @@ st.sidebar.selectbox(
 st.sidebar.markdown("---")
 st.sidebar.subheader(f"Pending corrections: {len(corrections)}")
 if corrections:
-    st.sidebar.dataframe(
-        pd.DataFrame([{"row": k, "new_delegate_id": v} for k, v in corrections.items()]),
-        width="stretch",
+    # Enrich with original delegate_id + name so user can see from→to
+    _corr_rows = []
+    for _ridx, _nid in corrections.items():
+        _orig_id = ""
+        _orig_nm = ""
+        if not df_merged.empty and _ridx in df_merged.index:
+            _orig_id = str(df_merged.at[_ridx, "delegate_id"])
+            if name_col in df_merged.columns:
+                _orig_nm = str(df_merged.at[_ridx, name_col])
+        _orig_pat = ""
+        if not df_merged.empty and _ridx in df_merged.index and "pattern" in df_merged.columns:
+            _orig_pat = str(df_merged.at[_ridx, "pattern"])
+        _corr_rows.append({
+            "row": _ridx,
+            "from_id": _orig_id,
+            "name": _orig_nm,
+            "pattern": _orig_pat,
+            "to_id": str(_nid),
+        })
+    _corr_df = pd.DataFrame(_corr_rows)
+    _corr_sel = st.sidebar.dataframe(
+        _corr_df, width="stretch", height=min(50 + 35 * len(_corr_df), 300),
+        on_select="rerun", selection_mode="single-row", key="corr_table_sel",
     )
+    _sel_corr_rows = (_corr_sel.selection.rows if _corr_sel and _corr_sel.selection else [])
+    try:
+        _sel_corr_meta = _corr_rows[_sel_corr_rows[0]] if _sel_corr_rows else None
+    except IndexError:
+        _sel_corr_meta = None
+
+    _btn_col, _rev_col = st.sidebar.columns(2)
+    if _btn_col.button("🗑 Delete row", key="corr_del_btn", disabled=not _sel_corr_meta):
+        st.session_state["corrections"].pop(_sel_corr_meta["row"], None)
+        save_corrections(st.session_state["corrections"])
+        st.rerun()
+
+    # Revise individual correction (change to_id)
+    if _sel_corr_meta:
+        _new_to = st.sidebar.text_input(
+            "Revise to_id:", value=_sel_corr_meta["to_id"], key="corr_rev_new"
+        )
+        if st.sidebar.button("✏️ Update", key="corr_rev_btn", help="Apply the revised delegate_id to this correction."):
+            if _new_to.strip():
+                save_correction(_sel_corr_meta["row"], _new_to.strip())
+                st.rerun()
     # ── Finalize: export corrected dataset ──────────────────────────────────
     # Parquet (fast even for 430k rows, ~1–2s) — use for archiving / next run
     buf_parq = io.BytesIO()
@@ -247,7 +298,7 @@ else:
     df_delegate = pd.DataFrame(columns=df_merged.columns)
 
 # Pre-compute corrected_delegate_ids: which delegates have ≥1 staged correction
-_t0 = _time.perf_counter()
+_t0 = _time.perf_counter() if DEBUG else 0.0
 _n_occurrences     = len(df_merged)
 _merged_columns    = list(df_merged.columns)
 _has_bio           = "birth_year" in df_merged.columns and df_merged["birth_year"].notna().any()
@@ -256,15 +307,18 @@ _known_delegate_ids = (
     df_merged["delegate_id"].dropna().unique().tolist() if not df_merged.empty else []
 )
 _corrected_delegate_ids: set[str] = set()
+_corrected_indices: set = set(corrections.keys())
 if corrections and not df_merged.empty:
     _valid_idxs = [r for r in corrections if r in df_merged.index]
     if _valid_idxs:
         _corrected_delegate_ids = set(
             df_merged.loc[_valid_idxs, "delegate_id"].astype(str).tolist()
         )
-print(f"  {'scalar pre-computation':<32} {(_time.perf_counter()-_t0)*1000:8.1f} ms")
+if DEBUG: print(f"  {'scalar pre-computation':<32} {(_time.perf_counter()-_t0)*1000:8.1f} ms")
 
 def _render_timed(name, fn):
+    if not DEBUG:
+        fn(); return
     _t0 = _time.perf_counter()
     fn()
     print(f"  render {name:<25} {(_time.perf_counter()-_t0)*1000:8.1f} ms")
@@ -297,6 +351,7 @@ _render_timed("tab0", lambda: tab0_overview.render(
     sandboxed=st.session_state["sandboxed"],
     reviewed=reviewed,
     corrected_delegate_ids=_corrected_delegate_ids,
+    debug=DEBUG,
 ))
 
 _render_timed("tab1", lambda: tab1_alive.render(
@@ -308,6 +363,7 @@ _render_timed("tab1", lambda: tab1_alive.render(
     MIN_AGE=MIN_AGE,
     MAX_AGE=MAX_AGE,
     save_correction=save_correction,
+    corrected_indices=_corrected_indices,
 ))
 
 _render_timed("tab2", lambda: tab2_patterns.render(
@@ -315,6 +371,8 @@ _render_timed("tab2", lambda: tab2_patterns.render(
     df_delegate=df_delegate,
     name_col=name_col,
     save_correction=save_correction,
+    corrected_indices=_corrected_indices,
+    debug=DEBUG,
 ))
 
 _render_timed("tab3", lambda: tab3_names.render(
@@ -324,6 +382,8 @@ _render_timed("tab3", lambda: tab3_names.render(
     df_p=df_p,
     name_col=name_col,
     save_correction=save_correction,
+    corrected_indices=_corrected_indices,
+    debug=DEBUG,
 ))
 
 _render_timed("tab4", lambda: tab4_timeline.render(

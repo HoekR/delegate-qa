@@ -17,6 +17,8 @@ def render(
     df_p: pd.DataFrame,
     name_col: str,
     save_correction: Callable,
+    corrected_indices: set = frozenset(),
+    debug: bool = False,
 ) -> None:
     with tab:
         st.title("📛 Name-form Mismatch")
@@ -57,16 +59,22 @@ def render(
                  if c in mismatch.columns]
         # Keep the original df_merged index as a column so Save can recover it.
         mismatch_display = mismatch[show3].reset_index(names="_orig_idx")
+        _n_done3 = mismatch_display["_orig_idx"].isin(corrected_indices).sum()
+        if _n_done3:
+            mismatch_display = mismatch_display[~mismatch_display["_orig_idx"].isin(corrected_indices)]
         _cap3 = 500
         _total3 = len(mismatch_display)
+        _done_note = f", {_n_done3} already corrected hidden" if _n_done3 else ""
         if _total3 > _cap3:
-            st.caption(f"Showing first {_cap3} of {_total3} mismatches — use the save button to fix them in bulk.")
+            st.caption(f"Showing first {_cap3} of {_total3} remaining mismatches{_done_note} — use the save button to fix them in bulk.")
             mismatch_display = mismatch_display.head(_cap3)
+        elif _n_done3:
+            st.caption(f"{_n_done3} already-corrected row(s) hidden.")
         st.caption("Click rows to select them, then bulk-reassign below.")
         _t0 = _t.perf_counter()
         sel3 = st.dataframe(mismatch_display, width="stretch", height=350,
                             on_select="rerun", selection_mode="multi-row")
-        print(f"  tab3 st.dataframe()            {(_t.perf_counter()-_t0)*1000:8.1f} ms  rows={len(mismatch_display)}")
+        if debug: print(f"  tab3 st.dataframe()            {(_t.perf_counter()-_t0)*1000:8.1f} ms  rows={len(mismatch_display)}")
         selected_rows3 = sel3.selection.rows if sel3 and sel3.selection else []
 
         if not mismatch.empty:
@@ -82,7 +90,7 @@ def render(
                     on="delegate_id", how="left"
                 )
             nc_b = name_col if name_col in breakdown.columns else "delegate_id"
-            print(f"  tab3 breakdown groupby         {(_t.perf_counter()-_t0)*1000:8.1f} ms")
+            if debug: print(f"  tab3 breakdown groupby         {(_t.perf_counter()-_t0)*1000:8.1f} ms")
             fig3 = px.bar(
                 breakdown.sort_values("n_mismatches", ascending=False).head(30),
                 x=nc_b, y="n_mismatches",
@@ -90,7 +98,7 @@ def render(
             )
             _t0 = _t.perf_counter()
             st.plotly_chart(fig3, width="stretch")
-            print(f"  tab3 st.plotly_chart()         {(_t.perf_counter()-_t0)*1000:8.1f} ms")
+            if debug: print(f"  tab3 st.plotly_chart()         {(_t.perf_counter()-_t0)*1000:8.1f} ms")
 
             st.subheader("Bulk reassign selected rows")
             st.caption(f"**{len(selected_rows3)}** row(s) selected")
@@ -99,4 +107,5 @@ def render(
                 orig_indices = mismatch_display.loc[selected_rows3, "_orig_idx"].tolist()
                 for ridx in orig_indices:
                     save_correction(ridx, nid3.strip())
-                st.success(f"Saved {len(orig_indices)} correction(s): → {nid3.strip()}")
+                st.toast(f"Saved {len(orig_indices)} correction(s): → {nid3.strip()}", icon="✅")
+                st.rerun()

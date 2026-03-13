@@ -85,6 +85,12 @@ cd /Users/rikhoekstra/develop/streamlit_worksheet
 uv run streamlit run sheet.py
 ```
 
+To enable terminal timing output:
+
+```bash
+DELEGATE_QA_DEBUG=1 uv run streamlit run sheet.py
+```
+
 ---
 
 ## Architecture decisions and gotchas
@@ -225,6 +231,19 @@ A tiny `st.components.v1.html()` block injected at the end of `sheet.py` measure
 
 new_vals = [str(v) for v in new_vals]  # always coerce to str
 out.loc[idxs, "delegate_id"] = new_vals
+```
+
+### 13. All timing output is gated behind `DELEGATE_QA_DEBUG`
+
+```python
+# sheet.py
+DEBUG: bool = os.getenv("DELEGATE_QA_DEBUG", "0") == "1"
+```
+
+All `print(f" tab* ...")` calls and `_timed()` / `_render_timed()` wrappers are silent by default. Pass `debug=DEBUG` to each tab render function; inside tabs guard prints with `if debug: print(...)`. Enable with:
+
+```bash
+DELEGATE_QA_DEBUG=1 streamlit run sheet.py
 ```
 
 ### 12. `tab=None` pattern for render functions used both in tabs and standalone pages

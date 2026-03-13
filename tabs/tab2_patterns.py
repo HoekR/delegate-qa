@@ -14,6 +14,8 @@ def render(
     df_delegate: pd.DataFrame,
     name_col: str,
     save_correction: Callable,
+    corrected_indices: set = frozenset(),
+    debug: bool = False,
 ) -> None:
     with tab:
         st.title("🔤 Pattern Anomalies")
@@ -40,7 +42,7 @@ def render(
             st.info("Install `rapidfuzz` for better scoring: `uv pip install rapidfuzz`")
 
         threshold = st.slider("Anomaly threshold (0–1)", 0.0, 1.0, 0.5, 0.05, key="pat_thresh")
-        top_n = st.slider("Show top N", 5, 100, 20, key="pat_topn")
+        top_n = st.slider("Show top N", 5, 200, 200, key="pat_topn")
 
         import time as _t
         _t0 = _t.perf_counter()
@@ -70,16 +72,55 @@ def render(
             return
 
         anom_df = pd.DataFrame(records).sort_values("norm_dist", ascending=False)
-        print(f"  tab2 anomaly loop              {(_t.perf_counter()-_t0)*1000:8.1f} ms  records={len(records)}")
-        above = anom_df[anom_df["norm_dist"] >= threshold]
-        st.metric("Anomalous patterns above threshold", len(above))
+        if debug: print(f"  tab2 anomaly loop              {(_t.perf_counter()-_t0)*1000:8.1f} ms  records={len(records)}")
+
+        # ── All unique patterns table ────────────────────────────────────────
+        st.subheader("All unique patterns for this delegate")
+        unique_pats = (
+            anom_df.groupby("pattern", observed=True)
+            .agg(
+                count=("row_index", "count"),
+                avg_dist=("norm_dist", "mean"),
+                modal_pattern=("modal_pattern", "first"),
+            )
+            .reset_index()
+            .sort_values("avg_dist", ascending=False)
+        )
+        unique_pats["avg_dist"] = unique_pats["avg_dist"].round(3)
+        unique_pats["already_corrected"] = unique_pats["pattern"].apply(
+            lambda p: int(anom_df.loc[anom_df["pattern"] == p, "row_index"].isin(corrected_indices).sum())
+        )
+        st.caption("Select a pattern row to filter the anomaly grid below to only those occurrences.")
+        sel_pat = st.dataframe(
+            unique_pats, width="stretch", height=min(50 + 35 * len(unique_pats), 300),
+            on_select="rerun", selection_mode="multi-row", key="pat_unique_sel",
+        )
+        _sel_pat_rows = sel_pat.selection.rows if sel_pat and sel_pat.selection else []
+        _active_patterns = unique_pats.iloc[_sel_pat_rows]["pattern"].tolist() if _sel_pat_rows else []
+
+        st.markdown("---")
+
+        # ── Anomaly rows grid ────────────────────────────────────────────────
+        above = anom_df[anom_df["norm_dist"] >= threshold].copy()
+        # If patterns are selected in the unique-patterns table, filter to them
+        if _active_patterns:
+            above = anom_df[anom_df["pattern"].isin(_active_patterns)].copy()
+            st.caption(f"Filtered to pattern(s) **{', '.join(_active_patterns)}** — {len(above)} row(s)")
+        _n_done2 = above["row_index"].isin(corrected_indices).sum()
+        if _n_done2:
+            above = above[~above["row_index"].isin(corrected_indices)]
+        st.metric(
+            "Rows shown" if _active_patterns else "Anomalous patterns above threshold",
+            len(above),
+            delta=f"-{_n_done2} already corrected" if _n_done2 else None
+        )
 
         above_top = above.head(top_n).reset_index(drop=True)
         st.caption("Click rows to select them, then bulk-reassign below.")
         _t0 = _t.perf_counter()
         sel2 = st.dataframe(above_top, width="stretch", height=350,
                             on_select="rerun", selection_mode="multi-row")
-        print(f"  tab2 st.dataframe()            {(_t.perf_counter()-_t0)*1000:8.1f} ms  rows={len(above_top)}")
+        if debug: print(f"  tab2 st.dataframe()            {(_t.perf_counter()-_t0)*1000:8.1f} ms  rows={len(above_top)}")
         selected_rows2 = sel2.selection.rows if sel2 and sel2.selection else []
 
         fig2 = px.histogram(anom_df, x="norm_dist", nbins=40,
@@ -87,14 +128,22 @@ def render(
         fig2.add_vline(x=threshold, line_dash="dash", line_color="red")
         _t0 = _t.perf_counter()
         st.plotly_chart(fig2, width="stretch")
-        print(f"  tab2 st.plotly_chart()         {(_t.perf_counter()-_t0)*1000:8.1f} ms")
+        if debug: print(f"  tab2 st.plotly_chart()         {(_t.perf_counter()-_t0)*1000:8.1f} ms")
 
         if not above.empty:
             st.subheader("Bulk reassign selected rows")
+            if _active_patterns:
+                _all_btn_indices = above["row_index"].tolist()
+                if st.button(
+                    f"Select all {len(_all_btn_indices)} rows for pattern(s) {', '.join(_active_patterns)}",
+                    key="anom_sel_all"
+                ):
+                    selected_rows2 = list(range(len(above_top)))
             st.caption(f"**{len(selected_rows2)}** row(s) selected")
             nid2 = st.text_input("New delegate_id (apply to all selected)", key="anom_nid")
             if st.button("💾 Save corrections", key="anom_save", disabled=not selected_rows2):
                 orig_indices = above_top.iloc[selected_rows2]["row_index"].tolist()
                 for ridx in orig_indices:
                     save_correction(ridx, nid2.strip())
-                st.success(f"Saved {len(orig_indices)} correction(s): → {nid2.strip()}")
+                st.toast(f"Saved {len(orig_indices)} correction(s): → {nid2.strip()}", icon="✅")
+                st.rerun()
