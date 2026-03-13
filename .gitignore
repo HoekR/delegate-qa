@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+.python-version
+
+# Data files — large, not for version control
+*.xlsx
+*.parquet
+*.csv
+
+# Streamlit cache — disk-persisted cache, machine-local
+.streamlit/
+
+# Persistence state — local working files, commit selectively
+corrections.json
+new_delegates.json
+remappings.json
+sandboxed.json
+reviewed.json
+
+# Editor / OS
+.vscode/settings.json
+.DS_Store
+*.swp

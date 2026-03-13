@@ -1,0 +1,16 @@
+[project]
+name = "streamlit-worksheet"
+version = "0.1.0"
+description = "Package to create interactive worksheet for delegates"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "streamlit>=1.54.0",
+    "pandas>=2.0",
+    "plotly>=5.0",
+    "openpyxl>=3.0",
+    "rapidfuzz>=3.0",
+    "watchdog>=3.0",
+    "pyarrow>=14.0",
+    "streamlit-aggrid>=0.3.4",
+]

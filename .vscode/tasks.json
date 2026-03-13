@@ -1,0 +1,68 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Profile app (timeit 3)",
+			"type": "shell",
+			"command": ".venv/bin/python profile_app.py --timeit 3",
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Profile app full",
+			"type": "shell",
+			"command": ".venv/bin/python profile_app.py --timeit 3 --save profile.prof 2>&1 | tee /tmp/prof_out.txt; cat /tmp/prof_out.txt",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Check parquet files",
+			"type": "shell",
+			"command": ".venv/bin/python -c \"\nimport time, pathlib, pandas as pd\nws = pathlib.Path('.')\nfor f in sorted(ws.glob('*.parquet')) + sorted(ws.glob('*.xlsx')):\n    t=time.perf_counter()\n    try:\n        df = pd.read_parquet(f) if f.suffix=='.parquet' else pd.read_excel(f)\n        print(f'{f.name}: {len(df):,} rows, {df.shape[1]} cols — {(time.perf_counter()-t)*1000:.0f}ms')\n    except Exception as e:\n        print(f'{f.name}: ERROR {e}')\n\"",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "List data files",
+			"type": "shell",
+			"command": "ls -lh *.xlsx *.parquet 2>/dev/null; echo '---'; pwd",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Run make_parquet verbose",
+			"type": "shell",
+			"command": ".venv/bin/python make_parquet.py 2>&1",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Profile after parquet",
+			"type": "shell",
+			"command": ".venv/bin/python profile_app.py --timeit 2 2>&1",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Profile final",
+			"type": "shell",
+			"command": ".venv/bin/python profile_app.py --timeit 3 2>&1",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Profile with issue counts",
+			"type": "shell",
+			"command": ".venv/bin/python profile_app.py --timeit 2 2>&1",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		}
+	]
+}
