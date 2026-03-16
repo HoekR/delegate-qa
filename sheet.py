@@ -33,12 +33,14 @@ from utils import (
     build_sidebar_options,
     enrich_persons_from_abbrd,
     get_delegate_slice,
+    load_config,
     load_corrections,
     load_data,
     load_new_delegates,
     load_remappings,
     load_reviewed,
     load_sandboxed,
+    save_config,
     save_corrections,
     save_reviewed,
     source_mtimes,
@@ -50,6 +52,7 @@ from tabs import (
     tab3_names,
     tab4_timeline,
     tab6_management,
+    tab7_settings,
 )
 # ---------------------------------------------------------------------------
 # DEBUG FLAG  — set env var to enable timing output in the terminal
@@ -81,6 +84,18 @@ if "sandboxed" not in st.session_state:
     st.session_state["sandboxed"] = load_sandboxed()
 if "reviewed" not in st.session_state:
     st.session_state["reviewed"] = load_reviewed()
+
+# Application settings (persisted to disk)
+if "config" not in st.session_state:
+    st.session_state["config"] = load_config(
+        {
+            "tab0": {
+                "sort_mode": "Work queue (unreviewed first)",
+                "search_term": "",
+                "select_col_pos": 0,
+            }
+        }
+    )
 
 corrections:    dict       = st.session_state["corrections"]
 new_delegates:  list[dict] = st.session_state["new_delegates"]
@@ -323,13 +338,14 @@ def _render_timed(name, fn):
     fn()
     print(f"  render {name:<25} {(_time.perf_counter()-_t0)*1000:8.1f} ms")
 
-tab0, tab1, tab2, tab3, tab4, tab6 = st.tabs([
+tab0, tab1, tab2, tab3, tab4, tab6, tab7 = st.tabs([
     "📋 Overview",
     "🧬 Alive Check",
     "🔤 Pattern Anomalies",
     "📛 Name Mismatch",
     "⏳ Timeline Gaps",
     "👤 Delegate Mgmt",
+    "⚙️ Settings",
 ])
 
 _render_timed("tab0", lambda: tab0_overview.render(
@@ -406,6 +422,9 @@ _render_timed("tab6", lambda: tab6_management.render(
     n_remapped_rows=n_remapped_rows,
     sandboxed=st.session_state["sandboxed"],
 ))
+
+_render_timed("tab7", lambda: tab7_settings.render(tab7))
+
 # end of sheet.py — all tab logic lives in tabs/tab*.py
 
 # ── Browser-side paint timer ——————————————————————————————————─

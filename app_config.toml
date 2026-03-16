@@ -1,0 +1,6 @@
+[tab0]
+sort_mode = "Work queue (unreviewed first)"
+search_term = ""
+select_col_pos = 0
+sort_primary = "Work queue (unreviewed first)"
+sort_secondary = "Delegate ID"

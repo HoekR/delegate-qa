@@ -37,8 +37,8 @@ The `*_FILE` constants (`PERSONS_FILE`, `OCCURRENCES_FILE`, `ABBRD_FILE`) always
 |------|--------------|
 | Select a delegate | Click a row in Overview or use the sidebar selectbox |
 | Fix it | Use the **Bulk reassign** widget in any tab — enters values into `corrections.json` immediately |
-| Mark done | Click **✅ Mark reviewed** in the sidebar — writes `reviewed.json` |
-| Export | **⬇ Export corrected (parquet)** — full dataset with corrections applied (~1s). **⬇ Changed rows only (Excel)** — only the N corrected rows, instant |
+| Mark done | Toggle the **Done** checkbox in the Overview table (or click **✅ Mark reviewed** in the sidebar) — writes `reviewed.json` |
+| Export | **⬇ Export corrected (parquet)** — full dataset with corrections applied (~1s). **⬇ Changed rows only (Excel)** — only the N corrected rows, instant. **⬇ Reviewed report (Markdown)** — generates a markdown report of done delegates. |
 
 Corrections are staged (JSON on disk) and never applied to the cached `df_merged`. The export step materialises them. This means:
 - The heavy `build_merged` cache is never invalidated by corrections

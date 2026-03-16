@@ -126,6 +126,7 @@ PROVINCE_ORDER_FILE = _WS / "province_order.json"
 REMAPPINGS_FILE     = _WS / "remappings.json"
 SANDBOXED_FILE      = _WS / "sandboxed.json"
 REVIEWED_FILE       = _WS / "reviewed.json"
+APP_CONFIG_FILE     = _WS / "app_config.toml"
 
 REPUBLIC_ADD_PREFIX = "republic_add_"
 
@@ -161,14 +162,19 @@ def load_reviewed() -> set[str]:
     """Return the set of delegate_ids the user has marked as fully reviewed."""
     if REVIEWED_FILE.exists():
         try:
-            return set(json.loads(REVIEWED_FILE.read_text()))
+            return set(str(x) for x in json.loads(REVIEWED_FILE.read_text()))
         except Exception:
             return set()
     return set()
 
 
 def save_reviewed(reviewed: set[str]) -> None:
-    REVIEWED_FILE.write_text(json.dumps(sorted(reviewed), indent=2))
+    """Persist the reviewed delegate IDs.
+
+    The file reflects exactly the provided set. If you want to merge
+    with existing values, do that before calling this function.
+    """
+    REVIEWED_FILE.write_text(json.dumps(sorted(set(reviewed)), indent=2))
 
 
 def apply_corrections(df: pd.DataFrame, corrections: dict) -> pd.DataFrame:
@@ -208,6 +214,57 @@ def load_new_delegates() -> list[dict]:
 
 def save_new_delegates(records: list[dict]) -> None:
     NEW_DELEGATES_FILE.write_text(json.dumps(records, indent=2, default=str))
+
+
+# ---------------------------------------------------------------------------
+# CONFIGURATION PERSISTENCE
+# ---------------------------------------------------------------------------
+
+def load_config(default: dict | None = None) -> dict:
+    """Load app configuration from disk.
+
+    Returns a dict. If the file is missing or invalid, returns `default` (or {}).
+    """
+    if default is None:
+        default = {}
+    if APP_CONFIG_FILE.exists():
+        try:
+            import tomllib
+
+            return tomllib.loads(APP_CONFIG_FILE.read_text())
+        except Exception:
+            return default
+    return default
+
+
+def _dump_toml(obj: object, indent: int = 0) -> str:
+    """Minimal TOML serializer for our simple config structure."""
+    indent_str = "" if indent == 0 else " " * indent
+    if isinstance(obj, dict):
+        out = []
+        for k, v in obj.items():
+            if isinstance(v, dict):
+                out.append(f"[{k}]")
+                out.append(_dump_toml(v, indent=0))
+            else:
+                out.append(f"{k} = {_dump_toml(v, indent=0)}")
+        return "\n".join(out)
+    if isinstance(obj, bool):
+        return "true" if obj else "false"
+    if isinstance(obj, (int, float)):
+        return str(obj)
+    if isinstance(obj, str):
+        # Escape backslashes and quotes
+        return '"' + obj.replace('\\', '\\\\').replace('"', '\\"') + '"'
+    if isinstance(obj, list):
+        return "[" + ", ".join(_dump_toml(v, indent=0) for v in obj) + "]"
+    # fallback to JSON string
+    return '"' + str(obj).replace('"', '\\"') + '"'
+
+
+def save_config(cfg: dict) -> None:
+    """Save app configuration to disk."""
+    APP_CONFIG_FILE.write_text(_dump_toml(cfg))
 
 
 # ---------------------------------------------------------------------------

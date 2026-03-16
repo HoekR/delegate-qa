@@ -165,14 +165,20 @@ def render(
         st.subheader("3️⃣  Add new delegate (republic_add_⟨##⟩)")
         st.caption(
             "For cases where the correct person is not in abbrd or the persons file. "
-            "A clash-free `republic_add_<##>` ID is generated automatically."
+            "You can provide only a delegate_id (or leave blank for an auto-generated `republic_add_<##>`). "
+            "If the ID exists in `abbrd.xlsx`, name/year fields are filled automatically."
         )
 
         next_id = next_republic_add_id(df_p, st.session_state["new_delegates"])
         st.info(f"Next available ID: **`{next_id}`**")
 
         with st.form("add_delegate_form"):
-            nd_naam     = st.text_input("Naam (surname, firstname)", key="nd_naam")
+            nd_delegate_id = st.text_input(
+                "Delegate ID (leave blank for auto-generated)",
+                value=str(next_id),
+                key="nd_delegate_id",
+            )
+            nd_naam     = st.text_input("Naam (surname, firstname) — optional", key="nd_naam")
             nd_birth    = st.number_input("Birth year (0 = unknown)", min_value=0, max_value=1900, step=1, key="nd_birth")
             nd_death    = st.number_input("Death year (0 = unknown)", min_value=0, max_value=1900, step=1, key="nd_death")
             nd_hlife    = st.number_input("hlife (estimated midpoint year, 0 = unknown)", min_value=0, max_value=1900, step=1, key="nd_hlife")
@@ -181,30 +187,82 @@ def render(
             submitted   = st.form_submit_button("➕ Add delegate")
 
         if submitted:
-            if not nd_naam.strip():
-                st.error("Naam is required.")
+            # Decide which ID to use: user-supplied (preferred) or auto-generated next_id.
+            desired_id = nd_delegate_id.strip() if nd_delegate_id.strip() else str(next_id)
+            safe_id = desired_id
+
+            # Prevent accidental duplicates against existing data.
+            existing_person_ids = set(map(str, df_p["delegate_id"])) if "delegate_id" in df_p.columns else set()
+            existing_new_ids = {str(r.get("delegate_id")) for r in st.session_state["new_delegates"]}
+            if safe_id in existing_person_ids or safe_id in existing_new_ids:
+                st.error(f"Delegate ID `{safe_id}` already exists. Pick a different ID.")
             else:
-                safe_id = next_republic_add_id(df_p, st.session_state["new_delegates"])
-                rec = {
-                    "delegate_id": safe_id,
-                    name_col:      nd_naam.strip(),
-                    "birth_year":  int(nd_birth) if nd_birth else pd.NA,
-                    "death_year":  int(nd_death) if nd_death else pd.NA,
-                    "hlife":       int(nd_hlife) if nd_hlife else pd.NA,
-                    "provincie":   nd_province.strip(),
-                    "source":      nd_source.strip(),
-                    "added_by":    "manual",
-                }
-                existing_ids = {str(r.get("delegate_id")) for r in st.session_state["new_delegates"]}
-                if str(safe_id) in existing_ids:
-                    st.error("ID clash detected — please press Add again to get a fresh ID.")
-                else:
-                    st.session_state["new_delegates"].append(rec)
-                    save_new_delegates(st.session_state["new_delegates"])
-                    st.success(
-                        f"Added `{safe_id}` ({nd_naam.strip()}). "
-                        "Clear Streamlit cache to merge into the overview."
-                    )
+                # If the user didn't provide a name, attempt to fill from abbrd.xlsx by ID.
+                abbrd_match = df_abbrd[
+                    df_abbrd[abbrd_id_col].astype(str).str.strip() == safe_id
+                ]
+                if abbrd_match.empty:
+                    abbrd_match = df_abbrd[
+                        df_abbrd[abbrd_id_col].astype(str).str.contains(safe_id, na=False, case=False)
+                    ]
+
+                rec = {"delegate_id": safe_id, "added_by": "manual"}
+                if nd_naam.strip():
+                    rec[name_col] = nd_naam.strip()
+                elif not abbrd_match.empty:
+                    rec[name_col] = str(abbrd_match.iloc[0][abbrd_name_col])
+
+                if nd_birth:
+                    rec["birth_year"] = int(nd_birth)
+                elif not abbrd_match.empty:
+                    for by in ("birth_year", "geboortejaar", "geboorte", "born", "birth"):
+                        if by in abbrd_match.columns and pd.notna(abbrd_match.iloc[0].get(by)):
+                            rec["birth_year"] = int(abbrd_match.iloc[0][by])
+                            break
+                if nd_death:
+                    rec["death_year"] = int(nd_death)
+                elif not abbrd_match.empty:
+                    for dy in ("death_year", "sterfjaar", "overlijden", "died", "death"):
+                        if dy in abbrd_match.columns and pd.notna(abbrd_match.iloc[0].get(dy)):
+                            rec["death_year"] = int(abbrd_match.iloc[0][dy])
+                            break
+                if nd_hlife:
+                    rec["hlife"] = int(nd_hlife)
+                elif not abbrd_match.empty and abbrd_hlife_col and abbrd_hlife_col in abbrd_match.columns:
+                    h = abbrd_match.iloc[0].get(abbrd_hlife_col)
+                    if pd.notna(h):
+                        rec["hlife"] = int(h)
+
+                # Extra person fields: province + name components
+                if nd_province.strip():
+                    rec["provincie"] = nd_province.strip()
+                elif not abbrd_match.empty and "provincie" in abbrd_match.columns:
+                    prov = abbrd_match.iloc[0].get("provincie")
+                    if pd.notna(prov):
+                        rec["provincie"] = str(prov)
+
+                # Fill surname/voornaam/tussenvoegsel from abbrd if not already supplied.
+                if "voornaam" in abbrd_match.columns and "voornaam" not in rec:
+                    v = abbrd_match.iloc[0].get("voornaam")
+                    if pd.notna(v):
+                        rec["voornaam"] = str(v)
+                if "tussenvoegsel" in abbrd_match.columns and "tussenvoegsel" not in rec:
+                    tv = abbrd_match.iloc[0].get("tussenvoegsel")
+                    if pd.notna(tv):
+                        rec["tussenvoegsel"] = str(tv)
+                if "geslachtsnaam" in abbrd_match.columns and "geslachtsnaam" not in rec:
+                    gn = abbrd_match.iloc[0].get("geslachtsnaam")
+                    if pd.notna(gn):
+                        rec["geslachtsnaam"] = str(gn)
+
+                if nd_source.strip():
+                    rec["source"] = nd_source.strip()
+
+                st.session_state["new_delegates"].append(rec)
+                save_new_delegates(st.session_state["new_delegates"])
+                st.success(
+                    f"Added `{safe_id}`. Clear Streamlit cache to merge into the overview."
+                )
 
         if st.session_state["new_delegates"]:
             st.markdown("---")
