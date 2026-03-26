@@ -6,6 +6,7 @@ The only streamlit import here is ``@st.cache_data`` (load_data, enrich_persons_
 """
 from __future__ import annotations
 
+import datetime
 import hashlib
 import json
 from pathlib import Path
@@ -18,6 +19,14 @@ import streamlit as st  # only for @st.cache_data
 # ---------------------------------------------------------------------------
 # FAST DATAFRAME HASH  (used in hash_funcs= to avoid O(n) rehashing)
 # ---------------------------------------------------------------------------
+
+def toggle_state_flag(key: str, default: bool = False) -> bool:
+    """Toggle a bool in Streamlit session state and return new value."""
+    current = bool(st.session_state.get(key, default))
+    new = not current
+    st.session_state[key] = new
+    return new
+
 
 def _hash_df(df: "pd.DataFrame | None") -> int:
     """O(1)-ish fingerprint for @st.cache_data hash_funcs.
@@ -120,13 +129,16 @@ def source_mtimes() -> tuple[float, ...]:
     return tuple(p.stat().st_mtime if p.exists() else 0.0 for p in candidates)
 
 # Persistence files
-CORRECTIONS_FILE    = _WS / "corrections.json"
-NEW_DELEGATES_FILE  = _WS / "new_delegates.json"
-PROVINCE_ORDER_FILE = _WS / "province_order.json"
-REMAPPINGS_FILE     = _WS / "remappings.json"
-SANDBOXED_FILE      = _WS / "sandboxed.json"
-REVIEWED_FILE       = _WS / "reviewed.json"
-APP_CONFIG_FILE     = _WS / "app_config.toml"
+CORRECTIONS_FILE        = _WS / "corrections.json"
+STAGED_CORRECTIONS_FILE   = _WS / "staged_corrections.json"
+APPROVED_CORRECTIONS_FILE = _WS / "approved_corrections.json"
+NEW_DELEGATES_FILE        = _WS / "new_delegates.json"
+PROVINCE_ORDER_FILE     = _WS / "province_order.json"
+REMAPPINGS_FILE         = _WS / "remappings.json"
+SANDBOXED_FILE          = _WS / "sandboxed.json"
+REVIEWED_FILE           = _WS / "reviewed.json"
+PATTERN_STATUS_FILE     = _WS / "pattern_status.json"
+APP_CONFIG_FILE         = _WS / "app_config.toml"
 
 REPUBLIC_ADD_PREFIX = "republic_add_"
 
@@ -134,22 +146,129 @@ MIN_AGE     = 16
 MAX_AGE     = 90
 DEFAULT_GAP = 10
 
+DEFAULT_CORRECTION_FIELDS = ["to_id", "from_id", "name", "updated_at", "source"]
+
 # ---------------------------------------------------------------------------
 # CORRECTIONS PERSISTENCE
 # ---------------------------------------------------------------------------
 
-def load_corrections() -> dict:
+def _get_corrections_config(config: dict | None = None) -> dict:
+    """Return the corrections configuration section with defaults."""
+    if config is None:
+        config = load_config()
+    config = normalize_config(config)
+    return config.get("corrections", {})
+
+
+def _normalize_correction_entry(entry, config: dict | None = None):
+    corr_cfg = _get_corrections_config(config)
+    to_id_key = corr_cfg.get("to_id_key", "to_id")
+    from_id_key = corr_cfg.get("from_id_key", "from_id")
+    name_key = corr_cfg.get("name_key", "name")
+    updated_at_key = corr_cfg.get("updated_at_key", "updated_at")
+    source_key = corr_cfg.get("source_key", "source")
+    source_default = corr_cfg.get("source_default", "manual")
+    source_legacy = corr_cfg.get("source_legacy", "legacy")
+
+    if isinstance(entry, dict):
+        normalized = {
+            to_id_key: str(entry.get(to_id_key, "")) if entry.get(to_id_key) is not None else "",
+            from_id_key: str(entry.get(from_id_key, "")) if entry.get(from_id_key) is not None else "",
+            name_key: str(entry.get(name_key, "")) if entry.get(name_key) is not None else "",
+            updated_at_key: entry.get(updated_at_key) or datetime.datetime.now().isoformat(timespec="seconds"),
+            source_key: str(entry.get(source_key, source_default)),
+        }
+    else:
+        normalized = {
+            to_id_key: str(entry),
+            from_id_key: "",
+            name_key: "",
+            updated_at_key: datetime.datetime.now().isoformat(timespec="seconds"),
+            source_key: source_legacy,
+        }
+    return normalized
+
+
+def make_correction_entry(
+    to_id: int | str,
+    from_id: str | None = None,
+    name: str | None = None,
+    source: str | None = None,
+    config: dict | None = None,
+) -> dict:
+    """Create a correction entry with fields coming from config defaults."""
+    corr_cfg = _get_corrections_config(config)
+    to_id_key = corr_cfg.get("to_id_key", "to_id")
+    from_id_key = corr_cfg.get("from_id_key", "from_id")
+    name_key = corr_cfg.get("name_key", "name")
+    updated_at_key = corr_cfg.get("updated_at_key", "updated_at")
+    source_key = corr_cfg.get("source_key", "source")
+    source_default = corr_cfg.get("source_default", "manual")
+
+    entry = {
+        to_id_key: str(to_id),
+        from_id_key: str(from_id) if from_id is not None else "",
+        name_key: str(name) if name is not None else "",
+        updated_at_key: datetime.datetime.now().isoformat(timespec="seconds"),
+        source_key: str(source or source_default),
+    }
+    return entry
+
+
+def load_corrections(config: dict | None = None) -> dict:
+    corr_cfg = _get_corrections_config(config)
     if CORRECTIONS_FILE.exists():
         try:
             raw = json.loads(CORRECTIONS_FILE.read_text())
+            out = {}
+            for k, v in raw.items():
+                try:
+                    idx = int(k)
+                except ValueError:
+                    continue
+                out[idx] = _normalize_correction_entry(v, config=corr_cfg)
+            return out
+        except Exception:
+            return {}
+    return {}
+
+
+def save_corrections(corrections: dict, config: dict | None = None) -> None:
+    corr_cfg = _get_corrections_config(config)
+    safe = {}
+    for k, v in corrections.items():
+        safe[str(k)] = _normalize_correction_entry(v, config=corr_cfg)
+    CORRECTIONS_FILE.write_text(json.dumps(safe, indent=2))
+
+
+def load_staged_corrections() -> dict:
+    if STAGED_CORRECTIONS_FILE.exists():
+        try:
+            raw = json.loads(STAGED_CORRECTIONS_FILE.read_text())
             return {int(k): v for k, v in raw.items()}
         except Exception:
             return {}
     return {}
 
 
-def save_corrections(corrections: dict) -> None:
-    CORRECTIONS_FILE.write_text(
+def save_staged_corrections(corrections: dict) -> None:
+    STAGED_CORRECTIONS_FILE.write_text(
+        json.dumps({str(k): v for k, v in corrections.items()}, indent=2)
+    )
+
+
+def load_approved_corrections() -> dict:
+    if APPROVED_CORRECTIONS_FILE.exists():
+        try:
+            raw = json.loads(APPROVED_CORRECTIONS_FILE.read_text())
+            return {int(k): v for k, v in raw.items()}
+        except Exception:
+            return {}
+    return {}
+
+
+def save_approved_corrections(corrections: dict) -> None:
+    APPROVED_CORRECTIONS_FILE.write_text(
         json.dumps({str(k): v for k, v in corrections.items()}, indent=2)
     )
 
@@ -168,6 +287,21 @@ def load_reviewed() -> set[str]:
     return set()
 
 
+def load_pattern_status() -> dict[str, bool]:
+    """Return saved explicit pattern validity status per occurrence key."""
+    if PATTERN_STATUS_FILE.exists():
+        try:
+            return {str(k): bool(v) for k, v in json.loads(PATTERN_STATUS_FILE.read_text()).items()}
+        except Exception:
+            return {}
+    return {}
+
+
+def save_pattern_status(status: dict[str, bool]) -> None:
+    """Persist pattern validity status."""
+    PATTERN_STATUS_FILE.write_text(json.dumps({str(k): bool(v) for k, v in status.items()}, indent=2))
+
+
 def save_reviewed(reviewed: set[str]) -> None:
     """Persist the reviewed delegate IDs.
 
@@ -177,7 +311,7 @@ def save_reviewed(reviewed: set[str]) -> None:
     REVIEWED_FILE.write_text(json.dumps(sorted(set(reviewed)), indent=2))
 
 
-def apply_corrections(df: pd.DataFrame, corrections: dict) -> pd.DataFrame:
+def apply_corrections(df: pd.DataFrame, corrections: dict, config: dict | None = None) -> pd.DataFrame:
     """Return a copy of *df* with all staged corrections applied.
 
     Only touches rows that exist in the index — silently skips stale keys.
@@ -186,11 +320,18 @@ def apply_corrections(df: pd.DataFrame, corrections: dict) -> pd.DataFrame:
     if not corrections:
         return df
     out = df.copy()
-    valid = {ridx: nid for ridx, nid in corrections.items() if ridx in out.index}
+    corr_cfg = _get_corrections_config(config)
+    to_id_key = corr_cfg.get("to_id_key", "to_id")
+
+    valid = {}
+    for ridx, entry in corrections.items():
+        if ridx in out.index:
+            if isinstance(entry, dict) and to_id_key in entry:
+                valid[ridx] = entry[to_id_key]
+            else:
+                valid[ridx] = entry
     if valid:
         idxs = list(valid.keys())
-        # Cast to the existing column dtype so parquet/pyarrow never sees a
-        # mixed-type (str + int) object column.
         col_dtype = out["delegate_id"].dtype
         new_vals = [valid[i] for i in idxs]
         if col_dtype == object or str(col_dtype) == "string":
@@ -237,6 +378,123 @@ def load_config(default: dict | None = None) -> dict:
     return default
 
 
+def normalize_config(config: dict | None = None) -> dict:
+    """Ensure the config has all expected keys and sane defaults.
+
+    This prevents missing config entries from causing runtime issues and
+    normalizes types (e.g., numeric fields stored as strings).
+    """
+    if config is None:
+        config = {}
+
+    # Tab0 settings (Overview tab)
+    tab0 = config.setdefault("tab0", {})
+    tab0.setdefault("sort_mode", "Work queue (unreviewed first)")
+    tab0.setdefault("sort_primary", "Work queue (unreviewed first)")
+    tab0.setdefault("sort_secondary", "Delegate ID")
+    tab0.setdefault("search_term", "")
+    try:
+        tab0["select_col_pos"] = int(tab0.get("select_col_pos", 0))
+    except Exception:
+        tab0["select_col_pos"] = 0
+
+    # Abbrd config
+    abbrd = config.setdefault("abbrd", {})
+    abbrd.setdefault("sheet", "lookup")
+    abbrd.setdefault("id_col", "id_persoon")
+    abbrd.setdefault("name_col", "fullname")
+    try:
+        abbrd["max_preview_fields"] = int(abbrd.get("max_preview_fields", 6))
+    except Exception:
+        abbrd["max_preview_fields"] = 6
+    abbrd["auto_refresh"] = bool(abbrd.get("auto_refresh", False))
+    abbrd["disable_cache"] = bool(abbrd.get("disable_cache", False))
+
+    # Corrections format defaults (allow these to be customized in app_config.toml)
+    corr_cfg = config.setdefault("corrections", {})
+    corr_cfg.setdefault("to_id_key", "to_id")
+    corr_cfg.setdefault("from_id_key", "from_id")
+    corr_cfg.setdefault("name_key", "name")
+    corr_cfg.setdefault("updated_at_key", "updated_at")
+    corr_cfg.setdefault("source_key", "source")
+    corr_cfg.setdefault("fields", DEFAULT_CORRECTION_FIELDS.copy())
+    corr_cfg.setdefault("source_default", "manual")
+    corr_cfg.setdefault("source_legacy", "legacy")
+
+    # Field map must be a dict; if it's stored as a string or missing, restore defaults
+    default_field_map = {
+        "fullname": "fullname",
+        "id_persoon": "cons_id_str",
+        "voornaam": "voornaam",
+        "tussenvoegsel": "tussenvoegsel",
+        "geslachtsnaam": "geslachtsnaam",
+        "geboortejaar": "geboortejaar",
+        "overlijden": "overlijdensjaar",
+        "beginjaar": "minjaar",
+        "eindjaar": "maxjaar",
+        "hlife": "hlife",
+        "provincie": "provincie",
+    }
+
+    fm = abbrd.get("field_map")
+    if not isinstance(fm, dict):
+        # Support legacy config where field_map is stored at the top level.
+        legacy_fm = config.get("field_map")
+        if isinstance(legacy_fm, dict):
+            abbrd["field_map"] = legacy_fm
+        else:
+            abbrd["field_map"] = default_field_map
+    else:
+        # Ensure all essential keys exist
+        for k, v in default_field_map.items():
+            fm.setdefault(k, v)
+
+    return config
+
+
+# ---------------------------------------------------------------------------
+# DELEGATE EDITS PERSISTENCE
+# ---------------------------------------------------------------------------
+
+def load_delegate_edits() -> dict[str, dict]:
+    """Load staged delegate edits (applied to df_p before rendering)."""
+    edits_file = _WS / "delegate_edits.json"
+    if edits_file.exists():
+        try:
+            return {str(k): v for k, v in json.loads(edits_file.read_text()).items()}
+        except Exception:
+            return {}
+    return {}
+
+
+def save_delegate_edits(edits: dict[str, dict]) -> None:
+    """Save staged delegate edits."""
+    edits_file = _WS / "delegate_edits.json"
+    edits_file.write_text(json.dumps(edits, indent=2, default=str))
+
+
+def apply_delegate_edits(df: pd.DataFrame, edits: dict[str, dict]) -> pd.DataFrame:
+    """Apply staged edits to a persons DataFrame."""
+    if not edits:
+        return df
+    out = df.copy()
+    out["delegate_id"] = out["delegate_id"].astype(str)
+    # Update existing rows
+    for did, changes in edits.items():
+        mask = out["delegate_id"] == str(did)
+        if mask.any():
+            for k, v in changes.items():
+                if k == "delegate_id":
+                    continue
+                out.loc[mask, k] = v
+        else:
+            # Add new row for unknown delegate_id
+            row = {"delegate_id": str(did)}
+            row.update(changes)
+            out = pd.concat([out, pd.DataFrame([row])], ignore_index=True)
+    return out
+
+
 def _dump_toml(obj: object, indent: int = 0) -> str:
     """Minimal TOML serializer for our simple config structure."""
     indent_str = "" if indent == 0 else " " * indent
@@ -265,6 +523,26 @@ def _dump_toml(obj: object, indent: int = 0) -> str:
 def save_config(cfg: dict) -> None:
     """Save app configuration to disk."""
     APP_CONFIG_FILE.write_text(_dump_toml(cfg))
+
+
+def rerun() -> None:
+    """Trigger a Streamlit rerun in a version-compatible way."""
+    # In modern Streamlit, button clicks already refresh.
+    # For explicit rerun calls, raise the streamlit RerunException with proper data.
+    try:
+        from streamlit.runtime.scriptrunner_utils.script_requests import RerunData
+        from streamlit.runtime.scriptrunner_utils.exceptions import RerunException
+
+        rerun_data = RerunData()
+        # Defensive: some code paths may have put a dict here, e.g. from older logic.
+        if isinstance(rerun_data, dict):
+            rerun_data = RerunData(**rerun_data)
+
+        raise RerunException(rerun_data=rerun_data)
+    except Exception:
+        # streamlit runtime may not support this interface in old versions.
+        # Silently continue and rely on user interaction to rerun.
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -398,27 +676,18 @@ def _read_df(candidates: list[Path]) -> tuple[pd.DataFrame, Path]:
     )
 
 
-@st.cache_data(persist="disk")
-def load_data(source_mtimes: tuple[float, ...] = ()) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame | None]:
-    """Returns (persons, occurrences, abbrd).
+def _load_data_uncached(source_mtimes: tuple[float, ...] = ()) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame | None]:
+    """Load data directly from disk without any Streamlit caching."""
 
-    ``source_mtimes`` is passed purely as a cache-busting sentinel: when any
-    source file is modified its mtime changes, producing a new cache key and
-    forcing a recompute.  With ``persist="disk"`` the result survives process
-    restarts (e.g. after editing a tab file) as long as the source data is
-    unchanged.
-
-    Files are resolved from candidate lists; workspace root is always checked
-    first so dropping / symlinking a file there is sufficient.
-    A .parquet sidecar next to any .xlsx is used automatically if present.
-    """
     df_p, _ = _read_df(PERSONS_CANDIDATES)
     if "delegate_id" in df_p.columns:
         df_p["delegate_id"] = pd.to_numeric(df_p["delegate_id"], errors="coerce").astype("Int64")
+        df_p["delegate_id"] = df_p["delegate_id"].astype(str)
 
     df_i, _ = _read_df(OCCURRENCES_CANDIDATES)
     if "delegate_id" in df_i.columns:
         df_i["delegate_id"] = pd.to_numeric(df_i["delegate_id"], errors="coerce").astype("Int64")
+        df_i["delegate_id"] = df_i["delegate_id"].astype(str)
 
     df_abbrd: pd.DataFrame | None = None
     abbrd_path = next(
@@ -426,9 +695,39 @@ def load_data(source_mtimes: tuple[float, ...] = ()) -> tuple[pd.DataFrame, pd.D
     )
     if abbrd_path is not None:
         parq = abbrd_path.with_suffix(".parquet")
-        df_abbrd = pd.read_parquet(parq) if parq.exists() else pd.read_excel(abbrd_path)
+
+        # Allow overriding the lookup sheet name via config (e.g. use a sheet named "lookup").
+        cfg = load_config()
+        sheet_name = cfg.get("abbrd", {}).get("sheet", "lookup")
+
+        if parq.exists():
+            df_abbrd = pd.read_parquet(parq)
+        else:
+            try:
+                df_abbrd = pd.read_excel(abbrd_path, sheet_name=sheet_name)
+            except Exception:
+                df_abbrd = pd.read_excel(abbrd_path)
+
         df_abbrd.columns = df_abbrd.columns.str.strip()
     return df_p, df_i, df_abbrd
+
+
+@st.cache_data(persist="disk")
+def _load_data_cached(source_mtimes: tuple[float, ...] = ()) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame | None]:
+    """Cached loader for the main data sources."""
+    return _load_data_uncached(source_mtimes)
+
+
+def load_data(source_mtimes: tuple[float, ...] = ()) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame | None]:
+    """Returns (persons, occurrences, abbrd).
+
+    This is the entry point used by the app. It will bypass Streamlit's cache
+    when `abbrd.disable_cache` is enabled in `app_config.toml`.
+    """
+    cfg = load_config()
+    if cfg.get("abbrd", {}).get("disable_cache"):
+        return _load_data_uncached(source_mtimes)
+    return _load_data_cached(source_mtimes)
 
 
 def _parse_leefjaren(series: pd.Series) -> tuple[pd.Series, pd.Series]:
@@ -548,7 +847,12 @@ def build_merged(
         for col in persons.columns:
             if col not in extra_df.columns:
                 extra_df[col] = pd.NA
-        persons = pd.concat([persons, extra_df[persons.columns]], ignore_index=True)
+        extra_sub = extra_df[persons.columns]
+        # Avoid FutureWarning from concatenating columns that are all-NA.
+        keep_cols = [c for c in extra_sub.columns if c == "delegate_id" or not extra_sub[c].isna().all()]
+        if "delegate_id" not in keep_cols and "delegate_id" in extra_sub.columns:
+            keep_cols.insert(0, "delegate_id")
+        persons = pd.concat([persons, extra_sub[keep_cols]], ignore_index=True)
 
     # attach birth/death year
     if "birth_year" not in persons.columns and df_bio is not None:
@@ -686,6 +990,26 @@ def build_merged(
 
     df = df_i.merge(persons, on="delegate_id", how="left", suffixes=("", "_p"))
 
+    # Pattern validity marker for filtering and corrections.
+    df["pattern_is_valid"] = True
+    if "pattern" in df.columns:
+        invalid_patterns = {"invalid", "<invalid>", "none", "<none>"}
+        inv_mask = df["pattern"].astype(str).str.lower().isin(invalid_patterns)
+        df.loc[inv_mask, "pattern_is_valid"] = False
+
+    persisted = load_pattern_status()
+    if "delegate_id" in df.columns and "pattern" in df.columns:
+        def _pattern_key(series):
+            did = str(series.get("delegate_id", ""))
+            pat = str(series.get("pattern", ""))
+            year = "" if pd.isna(series.get("j")) else str(int(series.get("j")))
+            return f"{did}|{pat}|{year}"
+
+        keys = df.apply(_pattern_key, axis=1)
+        for idx, key in keys.items():
+            if key in persisted:
+                df.at[idx, "pattern_is_valid"] = persisted[key]
+
     if "j" not in df.columns and "date" in df.columns:
         df["j"] = pd.to_datetime(df["date"], errors="coerce").dt.year
     if "j" in df.columns:
@@ -802,10 +1126,20 @@ def _compute_delegate_summary(
         )
         summary = summary.merge(max_gaps, on="delegate_id", how="left")
 
+    # Ensure delegates that appear in the persons file but have zero occurrences
+    # still show up in the overview (with NaNs for counts).
+    if "delegate_id" in df_p.columns:
+        all_delegates = pd.DataFrame({"delegate_id": df_p["delegate_id"].astype(str).unique()})
+        summary = all_delegates.merge(summary, on="delegate_id", how="left")
+
     # ---- name lookup & column ordering ------------------------------------
     if name_col in df_p.columns:
+        summary = summary.copy()
+        summary["delegate_id"] = summary["delegate_id"].astype(str)
+        df_p_copy = df_p[["delegate_id", name_col]].copy()
+        df_p_copy["delegate_id"] = df_p_copy["delegate_id"].astype(str)
         summary = summary.merge(
-            df_p[["delegate_id", name_col]].drop_duplicates(),
+            df_p_copy.drop_duplicates(subset=["delegate_id"]),
             on="delegate_id", how="left",
         )
     issue_cols = [c for c in ("n_alive_flags", "n_name_mismatches", "max_gap_years")
@@ -932,8 +1266,23 @@ def _build_delegate_index(df_merged: pd.DataFrame) -> dict[str, np.ndarray]:
     """
     if df_merged.empty or "delegate_id" not in df_merged.columns:
         return {}
+    # Normalize delegate_id values to strings so lookups are consistent across types.
+    # This avoids issues where the same ID is stored as int in the DataFrame but selected
+    # as a string via the UI.
+    df = df_merged.copy()
+
+    def _normalize(v: object) -> str:
+        if pd.isna(v):
+            return ""
+        s = str(v).strip()
+        if s.endswith(".0") and s[:-2].isdigit():
+            return s[:-2]
+        return s
+
+    df["delegate_id"] = df["delegate_id"].map(_normalize).astype(str)
+
     # reset_index so iloc positions match .indices values
-    return df_merged.reset_index(drop=True).groupby("delegate_id", sort=False, observed=True).indices  # type: ignore[return-value]
+    return df.reset_index(drop=True).groupby("delegate_id", sort=False, observed=True).indices  # type: ignore[return-value]
 
 
 def get_delegate_slice(df_merged: pd.DataFrame, delegate_id: str) -> pd.DataFrame:
@@ -944,10 +1293,28 @@ def get_delegate_slice(df_merged: pd.DataFrame, delegate_id: str) -> pd.DataFram
     """
     if not delegate_id or df_merged.empty or "delegate_id" not in df_merged.columns:
         return pd.DataFrame(columns=df_merged.columns)
+
+    def _normalize(v: object) -> str:
+        if pd.isna(v):
+            return ""
+        s = str(v).strip()
+        if s.endswith(".0") and s[:-2].isdigit():
+            return s[:-2]
+        return s
+
+    norm_id = _normalize(delegate_id)
     idx = _build_delegate_index(df_merged)
-    positions = idx.get(delegate_id)
+    positions = idx.get(norm_id)
+
+    # Fallback: if the cached index doesn't contain this key, do a safe string
+    # lookup so numeric/int mismatches don't prevent matching.
     if positions is None or len(positions) == 0:
+        if "delegate_id" in df_merged.columns:
+            mask = df_merged["delegate_id"].astype(str).map(_normalize) == norm_id
+            if mask.any():
+                return df_merged.loc[mask]
         return pd.DataFrame(columns=df_merged.columns)
+
     return df_merged.take(positions)
 
 

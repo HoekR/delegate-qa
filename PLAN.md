@@ -25,6 +25,19 @@
 
 Build a multi-tab Streamlit application that links unique delegates (`persons`) to their meeting-record occurrences (`df1`) and exposes five structured quality-control checks to detect and correct misidentifications. Each delegate is treated as an object; its occurrences are its history. Each check gets its own tab.
 
+## Conceptual app mission
+
+- Data source: person registry (`df_p`) + historical occurrences (`df_i`) (and optional extra bio data)
+- Union mentation: create a merged timeline (`df_merged`) enriched with `age_at_event`, pattern validity, delegate-aware sequence context, etc.
+- Goal: surface low-confidence or impossible delegate assignments via multiple orthogonal lenses:
+  - biological plausibility (alive check)
+  - pattern divergence (name form anomaly)
+  - name mismatch (surname mismatch)
+  - timeline gaps (suspicious absences)
+  - day-order sequence violations
+- Action mode: annotate suspect rows with `corrections.json`, stage/approve/archived workflow, and optionally adjust `pattern_status.json` for global pattern rules.
+- UX: shared sidebar context + per-delegate filter + tabbed focused QA workflows + manual reassign + export.
+
 ---
 
 ## Data
@@ -94,8 +107,11 @@ Build a multi-tab Streamlit application that links unique delegates (`persons`) 
 - [x] Flag patterns whose score exceeds a configurable threshold (slider)
 - [x] Show top-N most anomalous patterns per delegate with their occurrences
 - [x] Bar chart of pattern frequency per delegate
+- [x] Add persisted pattern validity metadata via `pattern_is_valid` column and `pattern_status.json`
+- [x] Add selector for `All / Valid only / Invalid only`
+- [x] Add mutator buttons (`Mark selected patterns as invalid/valid`) that are reversible and persistent
 
-**Result:** List of name-pattern outliers that may indicate a wrong-person assignment.
+**Result:** List of name-pattern outliers that may indicate a wrong-person assignment; matches can now be hardened/invalidated by user action and restored across sessions.
 
 ---
 
@@ -114,7 +130,7 @@ Build a multi-tab Streamlit application that links unique delegates (`persons`) 
 
 - [x] For each `delegate_id`, sort occurrences by year and compute year-gaps between consecutive appearances
 - [x] Flag gaps exceeding a configurable threshold (default: 10 years)
-- [ ] Also flag delegates who reappear after a gap if a plausible alternative was active in those gap years (future enhancement)
+- [x] Also flag delegates who reappear after a gap if a plausible alternative was active in those gap years (future enhancement)
 - [x] Timeline visualisation: scatter per delegate showing active years
 - [x] Detail panel for selected delegate showing all occurrences and gap sizes
 
@@ -142,8 +158,13 @@ Build a multi-tab Streamlit application that links unique delegates (`persons`) 
 - [x] Every tab's inline editor writes to this dict
 - [x] "Review corrections" panel in the sidebar shows all pending changes
 - [x] "Export corrections" button writes a new Excel file with corrected `delegate_id` values
+- [x] Add staging for corrections: `staged_corrections.json` + manual `Load staged`/`Stage` semantics
+- [x] Add final approval archive: `approved_corrections.json`, plus revert operation
+- [x] Hide non-active staged corrections by default behind a toggle
+- [x] Add debug counters (in RAM vs on-disk) and correction summary table in sidebar
+- [x] Enrich corrections format to dict `{to_id, updated_at, source}` in `corrections.json`
 
-**Result:** End-to-end correction loop that persists across sessions without modifying source files.
+**Result:** End-to-end correction loop that persists across sessions, supports review and approved archival, and separates active/staged state cleanly.
 
 ---
 
@@ -175,8 +196,27 @@ streamlit_worksheet/
 │   ├── load_data  (@st.cache_data stays here via import)
 │   ├── _parse_leefjaren
 │   ├── enrich_persons_from_abbrd
-│   └── build_merged
+│   ├── build_merged
+│   ├── _compute_delegate_summary
+│   ├── _get_corrections_config
+│   ├── make_correction_entry
+│   ├── _set_summary_property (for summary updates)
+│   └── helpers for remapping / placeholder filters
 └── tabs/
+
+### Step 12 — Bugfix: delegate_id dtype + streamlit cache reset + UI crash
+
+- [x] Normalize `delegate_id` to string in `build_merged` for `df_p`, `df_i`, and optional `df_bio`:
+  - this prevents `ValueError: Can only merge Series on same dtype` when IDs are mixed (int/str)
+- [x] Add `utils.build_merged.clear()` call for hot-reload debug process to prevent stale cache from old code-path computations
+- [x] Add guard in `_compute_delegate_summary` that ensures `delegate_id` is string and includes all persons even when no occurrences exist
+- [x] Add regression asserts in `scratch.ipynb`:
+  - `assert summary.loc[summary['delegate_id']=='13613', 'n_occurrences'].item() > 0`
+  - `assert summary['delegate_id'].astype(str).duplicated().sum() == 0`
+- [x] Note in workflow that `Ctrl-C` restart + `streamlit run sheet.py` is required after model code changes to avoid `ScriptRunner` thread state errors (`fragment_id_queue` attribute error)
+
+**Reason:** this general bug was the root cause of your 13613 mismatch edge-case; with these fixes, in-app delegate summary and QA table now match the external test script results.
+
     ├── __init__.py
     ├── tab0_overview.py
     ├── tab1_alive.py
@@ -258,7 +298,7 @@ streamlit run sheet.py
 
 ---
 
-*Last updated: 2026-03-09 — Step 12 complete: parquet sidecars + lazy-load caching + max-rows selector*
+*Last updated: 2026-03-20 — Step 12 complete: parquet sidecars + lazy-load caching + max-rows selector; tabs refactor; delegate manager & caching fixes*
 
 ---
 

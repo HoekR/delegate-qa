@@ -48,6 +48,21 @@ def render(
         max_age = st.slider("Max plausible age to serve", 70, 100, MAX_AGE, key="max_age")
 
         df_alive = df_delegate.copy()
+
+        # Ensure age_at_event exists (it may be missing for delegates with no occurrences).
+        if "age_at_event" not in df_alive.columns:
+            df_alive["age_at_event"] = pd.NA
+        df_alive["age_at_event"] = pd.to_numeric(df_alive["age_at_event"], errors="coerce")
+
+        # Allow filtering by year so users can zoom in on specific ranges
+        if "j" in df_alive.columns and not df_alive["j"].isna().all():
+            year_min = int(df_alive["j"].min())
+            year_max = int(df_alive["j"].max())
+            year_range = st.slider(
+                "Year range", year_min, year_max, (year_min, year_max), key="alive_year_range"
+            )
+            df_alive = df_alive[(df_alive["j"] >= year_range[0]) & (df_alive["j"] <= year_range[1])]
+
         df_alive["flag_young"] = df_alive["age_at_event"] < min_age
         df_alive["flag_old"]   = df_alive["age_at_event"] > max_age
         df_alive["flag_dead"]  = (

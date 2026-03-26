@@ -3,9 +3,14 @@ from __future__ import annotations
 
 from typing import Callable
 
+import re
+import numpy as np
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+from st_aggrid import AgGrid, GridOptionsBuilder
+
+from utils import load_pattern_status, save_pattern_status, rerun
 
 
 def render(
@@ -34,6 +39,16 @@ def render(
             st.warning("No `pattern` column in occurrences file.")
             return
 
+        # Filter by user-visible pattern validity status.
+        pat_filter = st.selectbox(
+            "Pattern validity", ["All", "Valid only", "Invalid only"], key="pat_validity",
+        )
+        if "pattern_is_valid" in df_delegate.columns:
+            if pat_filter == "Valid only":
+                df_delegate = df_delegate[df_delegate["pattern_is_valid"] == True]
+            elif pat_filter == "Invalid only":
+                df_delegate = df_delegate[df_delegate["pattern_is_valid"] == False]
+
         try:
             from rapidfuzz import distance as rfd
             has_rf = True
@@ -47,25 +62,39 @@ def render(
         import time as _t
         _t0 = _t.perf_counter()
         records = []
+
+        def _split_patterns(pat: str) -> list[str]:
+            # Some datasets store multiple patterns in a single cell (e.g. separated by ';' or '|').
+            # If so, split them so each pattern appears as its own row in the anomaly table.
+            pat = str(pat).strip()
+            if not pat:
+                return []
+            # Common delimiters used in pattern lists
+            parts = [p.strip() for p in re.split(r"[;|\\/]+", pat) if p.strip()]
+            return parts if len(parts) > 1 else [pat]
+
         for del_id, grp in df_delegate.groupby("delegate_id", observed=True):
             pats = grp["pattern"].dropna().astype(str)
             if pats.empty:
                 continue
             modal = pats.mode().iloc[0]
             for idx, pat in pats.items():
-                if has_rf:
-                    score = rfd.Levenshtein.normalized_distance(pat, modal)
-                else:
-                    score = 1 - sum(a == b for a, b in zip(pat, modal)) / max(len(pat), len(modal), 1)
-                records.append({
-                    "delegate_id": del_id,
-                    name_col: grp.loc[idx, name_col] if name_col in grp.columns else del_id,
-                    "pattern": pat,
-                    "modal_pattern": modal,
-                    "norm_dist": round(score, 3),
-                    "year": grp.loc[idx, "j"] if "j" in grp.columns else pd.NA,
-                    "row_index": idx,
-                })
+                for pat_part in _split_patterns(pat):
+                    if has_rf:
+                        score = rfd.Levenshtein.normalized_distance(pat_part, modal)
+                    else:
+                        score = 1 - sum(a == b for a, b in zip(pat_part, modal)) / max(
+                            len(pat_part), len(modal), 1
+                        )
+                    records.append({
+                        "delegate_id": del_id,
+                        name_col: grp.loc[idx, name_col] if name_col in grp.columns else del_id,
+                        "pattern": pat_part,
+                        "modal_pattern": modal,
+                        "norm_dist": round(score, 3),
+                        "year": grp.loc[idx, "j"] if "j" in grp.columns else pd.NA,
+                        "row_index": idx,
+                    })
 
         if not records:
             st.info("No pattern data available for the current selection.")
@@ -91,12 +120,31 @@ def render(
             lambda p: int(anom_df.loc[anom_df["pattern"] == p, "row_index"].isin(corrected_indices).sum())
         )
         st.caption("Select a pattern row to filter the anomaly grid below to only those occurrences.")
-        sel_pat = st.dataframe(
-            unique_pats, width="stretch", height=min(50 + 35 * len(unique_pats), 300),
-            on_select="rerun", selection_mode="multi-row", key="pat_unique_sel",
+        gb_unique = GridOptionsBuilder.from_dataframe(unique_pats)
+        gb_unique.configure_default_column(resizable=True, sortable=True, filter=True)
+        gb_unique.configure_selection(selection_mode="multiple", use_checkbox=True)
+        unique_grid_options = gb_unique.build()
+        sel_pat = AgGrid(
+            unique_pats,
+            gridOptions=unique_grid_options,
+            width="100%",
+            height=min(50 + 35 * len(unique_pats), 300),
+            fit_columns_on_grid_load=False,
+            key="pat_unique_sel",
         )
-        _sel_pat_rows = sel_pat.selection.rows if sel_pat and sel_pat.selection else []
-        _active_patterns = unique_pats.iloc[_sel_pat_rows]["pattern"].tolist() if _sel_pat_rows else []
+        sel_rows_pat = sel_pat.get("selected_rows", [])
+        if isinstance(sel_rows_pat, pd.DataFrame):
+            sel_rows_pat = sel_rows_pat.to_dict("records")
+        if not isinstance(sel_rows_pat, list):
+            sel_rows_pat = []
+        _active_patterns = [r.get("pattern") for r in sel_rows_pat if r.get("pattern")]
+
+        st.text_input(
+            "Selected patterns",
+            value=", ".join(_active_patterns),
+            key="tab2_selected_patterns",
+            disabled=True,
+        )
 
         st.markdown("---")
 
@@ -117,11 +165,41 @@ def render(
 
         above_top = above.head(top_n).reset_index(drop=True)
         st.caption("Click rows to select them, then bulk-reassign below.")
+
+        # Debug banner: show disk vs in-memory corrections count
+        st.markdown(
+            f"**Corrections loaded:** {st.session_state.get('corrections_disk_loaded', 0)} | "
+            f"**In-memory corrections:** {len(st.session_state.get('corrections', {}))}"
+        )
+
+        st.info("Pattern match filter applied; click rows for bulk action (or use select-box in header).", icon="ℹ️")
+
         _t0 = _t.perf_counter()
-        sel2 = st.dataframe(above_top, width="stretch", height=350,
-                            on_select="rerun", selection_mode="multi-row")
-        if debug: print(f"  tab2 st.dataframe()            {(_t.perf_counter()-_t0)*1000:8.1f} ms  rows={len(above_top)}")
-        selected_rows2 = sel2.selection.rows if sel2 and sel2.selection else []
+
+        st.caption(f"Selected patterns: {', '.join(_active_patterns)}" if _active_patterns else "No patterns selected")
+
+        # Alive tab style: use st.dataframe row selection.
+        above_top_display = above_top.copy().reset_index(drop=True)
+        sel2 = st.dataframe(
+            above_top_display,
+            width="stretch",
+            height=350,
+            on_select="rerun",
+            selection_mode="multi-row",
+        )
+
+        if debug: print(f"  tab2 dataframe()              {(_t.perf_counter()-_t0)*1000:8.1f} ms  rows={len(above_top_display)}")
+
+        selected_rows2 = []
+        if sel2 is not None and hasattr(sel2, "selection") and sel2.selection:
+            selected_rows2 = sel2.selection.rows
+
+        # If no explicit row selection, but patterns are active, fallback to all filtered rows.
+        if not selected_rows2 and _active_patterns:
+            selected_rows2 = above_top_display.index.tolist()
+
+        # Convert selected display row indices to original row_index values
+        selected_rows2 = [above_top_display.loc[i, "row_index"] for i in selected_rows2 if i is not None and 0 <= i < len(above_top_display)]
 
         fig2 = px.histogram(anom_df, x="norm_dist", nbins=40,
                             title="Distribution of normalised edit distances")
@@ -132,18 +210,36 @@ def render(
 
         if not above.empty:
             st.subheader("Bulk reassign selected rows")
-            if _active_patterns:
-                _all_btn_indices = above["row_index"].tolist()
-                if st.button(
-                    f"Select all {len(_all_btn_indices)} rows for pattern(s) {', '.join(_active_patterns)}",
-                    key="anom_sel_all"
-                ):
-                    selected_rows2 = list(range(len(above_top)))
             st.caption(f"**{len(selected_rows2)}** row(s) selected")
             nid2 = st.text_input("New delegate_id (apply to all selected)", key="anom_nid")
             if st.button("💾 Save corrections", key="anom_save", disabled=not selected_rows2):
-                orig_indices = above_top.iloc[selected_rows2]["row_index"].tolist()
+                orig_indices = selected_rows2
                 for ridx in orig_indices:
                     save_correction(ridx, nid2.strip())
                 st.toast(f"Saved {len(orig_indices)} correction(s): → {nid2.strip()}", icon="✅")
+                st.rerun()
+
+            # Pattern validity toggles (reversible)
+            if st.button("Mark selected patterns as invalid", key="mark_invalid", disabled=not selected_rows2):
+                pattern_status = load_pattern_status()
+                for row_idx in selected_rows2:
+                    row = above_top.loc[above_top["row_index"] == row_idx].iloc[0]
+                    key = f"{row['delegate_id']}|{row['pattern']}|{row['year']}"
+                    pattern_status[key] = False
+                    if nid2.strip():
+                        save_correction(row_idx, nid2.strip())
+                save_pattern_status(pattern_status)
+                st.toast("Marked selected patterns invalid and applied corrections (if delegate_id set).", icon="✅")
+                st.rerun()
+
+            if st.button("Mark selected patterns as valid", key="mark_valid", disabled=not selected_rows2):
+                pattern_status = load_pattern_status()
+                for row_idx in selected_rows2:
+                    row = above_top.loc[above_top["row_index"] == row_idx].iloc[0]
+                    key = f"{row['delegate_id']}|{row['pattern']}|{row['year']}"
+                    pattern_status[key] = True
+                    if nid2.strip():
+                        save_correction(row_idx, nid2.strip())
+                save_pattern_status(pattern_status)
+                st.toast("Marked selected patterns valid and applied corrections (if delegate_id set).", icon="✅")
                 st.rerun()

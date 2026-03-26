@@ -79,9 +79,19 @@ def render(
 
         if not mismatch.empty:
             _t0 = _t.perf_counter()
+            if "name_mismatch" in mismatch.columns:
+                agg_args = {"n_mismatches": ("name_mismatch", "sum")}
+            elif "j" in mismatch.columns:
+                agg_args = {"n_mismatches": ("j", "count")}
+            else:
+                # Fallback when 'j' is missing: count rows per delegate
+                mismatch = mismatch.copy()
+                mismatch["__mismatch_count"] = 1
+                agg_args = {"n_mismatches": ("__mismatch_count", "sum")}
+
             breakdown = (
                 mismatch.groupby("delegate_id", observed=True)
-                .agg(n_mismatches=("name_mismatch", "sum") if "name_mismatch" in mismatch.columns else ("j", "count"))
+                .agg(**agg_args)
                 .reset_index()
             )
             if name_col in df_p.columns:

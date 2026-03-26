@@ -1,0 +1,13 @@
+{
+  "fullname"  : "fullname",
+  "id_persoon": "cons_id_str",
+  "voornaam": "voornaam",
+  "tussenvoegsel": "tussenvoegsel",
+  "geslachtsnaam": "geslachtsnaam",
+  "geboortejaar": "birth_year",
+  "overlijden": "death_year",
+  "beginjaar":"minjaar",
+  "eindjaar":"maxjaar",
+  "hlife": "hlife",
+  "provincie": "provincie",
+}

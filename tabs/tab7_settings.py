@@ -7,9 +7,11 @@ in the UI (sort mode, search term, select column position, etc.).
 
 from __future__ import annotations
 
+import json
+
 import streamlit as st
 
-from utils import save_config
+from utils import rerun, save_config
 
 
 def render(tab) -> None:
@@ -63,6 +65,147 @@ def render(tab) -> None:
         )
 
         st.markdown("---")
+        st.subheader("Abbrd file location")
+        st.caption(
+            "Override which abbrd.xlsx file is loaded. Leave blank to use the built-in search paths."
+        )
+        abbrd_cfg = cfg.setdefault("abbrd", {})
+        abbrd_path = st.text_input(
+            "Abbrd file path",
+            value=str(abbrd_cfg.get("path", "")),
+            key="abbrd_path",
+        )
+        abbrd_cfg["path"] = abbrd_path.strip()
+
+        st.markdown("---")
+        st.subheader("Abbrd sheet & columns")
+        st.caption(
+            "Specify which sheet and which columns in the abbrd workbook are used for lookup and enrichment."
+        )
+        abbrd_sheet = st.text_input(
+            "Abbrd sheet name",
+            value=str(abbrd_cfg.get("sheet", "lookup")),
+            key="abbrd_sheet",
+        )
+        abbrd_cfg["sheet"] = abbrd_sheet.strip()
+
+        abbrd_id_col = st.text_input(
+            "Abbrd ID column",
+            value=str(abbrd_cfg.get("id_col", "id_persoon")),
+            key="abbrd_id_col",
+        )
+        abbrd_cfg["id_col"] = abbrd_id_col.strip()
+
+        abbrd_name_col = st.text_input(
+            "Abbrd name column",
+            value=str(abbrd_cfg.get("name_col", "fullname")),
+            key="abbrd_name_col",
+        )
+        abbrd_cfg["name_col"] = abbrd_name_col.strip()
+
+        st.markdown("---")
+        st.subheader("Abbrd field mapping")
+        st.caption(
+            "Map abbrd columns to the delegate/person columns used in the app. "
+            "Enter a JSON object, e.g. {\"id_persoon\": \"cons_id_str\"}."
+        )
+
+        default_field_map = abbrd_cfg.get("field_map", {
+            "fullname": "fullname",
+            "id_persoon": "cons_id_str",
+            "voornaam": "voornaam",
+            "tussenvoegsel": "tussenvoegsel",
+            "geslachtsnaam": "geslachtsnaam",
+            "geboortejaar": "geboortejaar",
+            "overlijden": "overlijdensjaar",
+            "beginjaar": "minjaar",
+            "eindjaar": "maxjaar",
+            "hlife": "hlife",
+            "provincie": "provincie",
+        })
+
+        field_map_text = st.text_area(
+            "Field mapping (JSON)",
+            value=json.dumps(default_field_map, indent=2, ensure_ascii=False),
+            key="abbrd_field_map",
+            height=240,
+        )
+        try:
+            parsed_map = json.loads(field_map_text)
+            if isinstance(parsed_map, dict):
+                abbrd_cfg["field_map"] = parsed_map
+            else:
+                st.warning("Field map must be a JSON object (dict).")
+        except Exception as e:
+            st.warning(f"Invalid JSON: {e}")
+
+        st.markdown("---")
+        st.subheader("Abbrd advanced options")
+        st.caption("Additional tuning options for how the abbrd lookup behaves.")
+
+        abbrd_auto_refresh = st.checkbox(
+            "Auto-refresh supplemented delegates on load",
+            value=bool(abbrd_cfg.get("auto_refresh", False)),
+            key="abbrd_auto_refresh",
+        )
+        abbrd_cfg["auto_refresh"] = bool(abbrd_auto_refresh)
+
+        abbrd_disable_cache = st.checkbox(
+            "Disable data cache (always reload from disk)",
+            value=bool(abbrd_cfg.get("disable_cache", False)),
+            key="abbrd_disable_cache",
+        )
+        abbrd_cfg["disable_cache"] = bool(abbrd_disable_cache)
+
+        abbrd_max_preview = st.number_input(
+            "Max debug preview fields",
+            min_value=1,
+            max_value=50,
+            value=int(abbrd_cfg.get("max_preview_fields", 6)),
+            key="abbrd_max_preview_fields",
+        )
+        abbrd_cfg["max_preview_fields"] = int(abbrd_max_preview)
+
+        st.markdown("---")
+        st.subheader("Correction format")
+        corr_cfg = cfg.setdefault("corrections", {})
+
+        corr_to_id_key = st.text_input(
+            "Correction to_id key",
+            value=str(corr_cfg.get("to_id_key", "to_id")),
+            key="corr_to_id_key",
+        )
+        corr_cfg["to_id_key"] = corr_to_id_key.strip() or "to_id"
+
+        corr_from_id_key = st.text_input(
+            "Correction from_id key",
+            value=str(corr_cfg.get("from_id_key", "from_id")),
+            key="corr_from_id_key",
+        )
+        corr_cfg["from_id_key"] = corr_from_id_key.strip() or "from_id"
+
+        corr_name_key = st.text_input(
+            "Correction name key",
+            value=str(corr_cfg.get("name_key", "name")),
+            key="corr_name_key",
+        )
+        corr_cfg["name_key"] = corr_name_key.strip() or "name"
+
+        corr_updated_at_key = st.text_input(
+            "Correction updated_at key",
+            value=str(corr_cfg.get("updated_at_key", "updated_at")),
+            key="corr_updated_at_key",
+        )
+        corr_cfg["updated_at_key"] = corr_updated_at_key.strip() or "updated_at"
+
+        corr_source_key = st.text_input(
+            "Correction source key",
+            value=str(corr_cfg.get("source_key", "source")),
+            key="corr_source_key",
+        )
+        corr_cfg["source_key"] = corr_source_key.strip() or "source"
+
+        st.markdown("---")
         st.button("Reset to defaults", on_click=_reset_defaults)
 
         st.write("**Current config (app_config.toml)**")
@@ -80,10 +223,29 @@ def _on_search_changed(tab0_cfg: dict) -> None:
 def _reset_defaults() -> None:
     cfg = st.session_state.get("config", {})
     cfg["tab0"] = {
-        "sort_mode": "Work queue (unreviewed first)",
+        "sort_primary": "Work queue (unreviewed first)",
+        "sort_secondary": "Delegate ID",
         "search_term": "",
         "select_col_pos": 0,
     }
+    cfg["abbrd"] = {
+        "sheet": "lookup",
+        "id_col": "id_persoon",
+        "name_col": "fullname",
+        "max_preview_fields": 6,
+        "auto_refresh": False,
+        "disable_cache": False,
+    }
+    cfg["corrections"] = {
+        "to_id_key": "to_id",
+        "from_id_key": "from_id",
+        "name_key": "name",
+        "updated_at_key": "updated_at",
+        "source_key": "source",
+        "fields": ["to_id", "from_id", "name", "updated_at", "source"],
+        "source_default": "manual",
+        "source_legacy": "legacy",
+    }
     st.session_state["config"] = cfg
     save_config(cfg)
-    st.experimental_rerun()
+    rerun()

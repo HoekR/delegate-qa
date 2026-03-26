@@ -56,6 +56,10 @@ Corrections are staged (JSON on disk) and never applied to the cached `df_merged
 | `reviewed.json` | Set of `delegate_id` strings the user has marked as fully reviewed |
 | `sandboxed.json` | Delegates marked "known wrong, cannot fix" — shown with 🔒 in the grid |
 
+## Reloading / refreshing tables
+
+If you make edits to source files (e.g., `corrections.json`, the input Excel files, or `remappings.json`) and want the tables to update immediately, click **"🔄 Reload all tables"** in the sidebar. This clears Streamlit's in-memory cache and reruns the app, ensuring all tabs reflect the latest data.
+
 ## Code layout
 
 ```

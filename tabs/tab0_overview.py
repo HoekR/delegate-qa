@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -10,9 +11,8 @@ from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
 
 import os
 
-from utils import REVIEWED_FILE, save_reviewed, save_config
+from utils import REVIEWED_FILE, save_reviewed, save_config, save_corrections
 
-REVIEWED_DEBUG: bool = os.getenv("DELEGATE_QA_REVIEWED_DEBUG", "0") == "1"
 
 
 def render(
@@ -35,12 +35,9 @@ def render(
     sandboxed: set[str],
     reviewed: set[str] | None = None,
     corrected_delegate_ids: set[str] | None = None,
-    debug: bool = False,
 ) -> None:
     with tab:
         st.title("👥 Delegate QA — Overview")
-        if REVIEWED_DEBUG:
-            st.caption(f"[reviewed debug] loaded reviewed set ({len(reviewed or set())}): {sorted(reviewed or set())}")
 
         if load_error:
             st.error(f"Could not load data:\n\n{load_error}")
@@ -117,20 +114,29 @@ def render(
         if "tab0_select_col_pos" not in st.session_state:
             st.session_state["tab0_select_col_pos"] = tab0_cfg["select_col_pos"]
 
+        def _set_state_if_unbound(key: str, value):
+            """Safely set a session_state value without overwriting an instantiated widget key."""
+            if key not in st.session_state:
+                st.session_state[key] = value
+
         def _reset_view() -> None:
             """Reset selection/search/sort to configured defaults."""
             cfg = st.session_state.get("config", {})
             tab0_cfg = cfg.get("tab0", {})
             st.session_state["sel_delegate_id"] = None
-            st.session_state["sidebar_delegate_name"] = "(none)"
-            st.session_state["tab0_search"] = tab0_cfg.get("search_term", "")
-            st.session_state["tab0_sort_primary"] = tab0_cfg.get(
-                "sort_primary", "Work queue (unreviewed first)"
+            st.session_state["tab0_search_force"] = tab0_cfg.get("search_term", "")
+            _set_state_if_unbound(
+                "tab0_sort_primary",
+                tab0_cfg.get("sort_primary", "Work queue (unreviewed first)"),
             )
-            st.session_state["tab0_sort_secondary"] = tab0_cfg.get(
-                "sort_secondary", "Delegate ID"
+            _set_state_if_unbound(
+                "tab0_sort_secondary",
+                tab0_cfg.get("sort_secondary", "Delegate ID"),
             )
-            st.session_state["tab0_select_col_pos"] = tab0_cfg.get("select_col_pos", 0)
+            _set_state_if_unbound(
+                "tab0_select_col_pos",
+                tab0_cfg.get("select_col_pos", 0),
+            )
             # Keep config in sync (in case defaults were changed in config file)
             st.session_state["config"] = cfg
             save_config(cfg)
@@ -145,7 +151,6 @@ def render(
             "Select column position (0 = first)",
             min_value=0,
             max_value=max_index,
-            value=st.session_state["tab0_select_col_pos"],
             step=1,
             key="tab0_select_col_pos",
         )
@@ -157,9 +162,6 @@ def render(
         st.markdown(
             "**Tip:** The green checkbox is for marking delegates as *reviewed* (persisted to disk),\n"
             "and is separate from row selection (which controls which delegate shows in tabs 1–4)."
-        )
-        st.caption(
-            f"Reviewed set contains {len(_reviewed)} IDs (first 10): {sorted(_reviewed)[:10]}"
         )
 
         # Sorting mode for the grid (help understand why selection appears to 'move')
@@ -241,15 +243,51 @@ def render(
             # Persist search term in config
             cfg = st.session_state.get("config", {})
             tab0_cfg = cfg.setdefault("tab0", {})
-            search_term = st.session_state.get("tab0_search", tab0_cfg.get("search_term", ""))
+            if "tab0_search_force" in st.session_state:
+                search_term = st.session_state.pop("tab0_search_force")
+                st.session_state["tab0_search"] = search_term
+            else:
+                search_term = st.session_state.get("tab0_search", tab0_cfg.get("search_term", ""))
 
-            search_term = search_col.text_input(
-                "Filter delegates", value=search_term, placeholder="name or ID…",
-                key="tab0_search", label_visibility="collapsed",
+            search_input = st.session_state.get("tab0_search_input", "")
+            applied_search = st.session_state.get("tab0_search", "")
+
+            search_input = search_col.text_input(
+                "Filter delegates",
+                value=search_input,
+                placeholder="name or ID…",
+                key="tab0_search_input",
+                label_visibility="collapsed",
             )
-            if search_col.button("Clear filter", key="tab0_clear_search"):
-                _reset_view()
-                st.experimental_rerun()
+
+            if search_col.button("Apply search", key="tab0_apply_search"):
+                st.session_state["tab0_search"] = str(search_input).strip()
+                # Preserve existing selected delegate to avoid auto-clearing when search changes.
+                if hasattr(st, "experimental_rerun"):
+                    st.experimental_rerun()
+                elif hasattr(st, "rerun"):
+                    st.rerun()
+
+            if search_col.button("Clear name and selection", key="tab0_clear_name"):
+                # Avoid writing widget key directly; it is controlled by the input widget.
+                st.session_state["tab0_search"] = ""
+                st.session_state["sel_delegate_id"] = None
+                if hasattr(st, "experimental_rerun"):
+                    st.experimental_rerun()
+                elif hasattr(st, "rerun"):
+                    st.rerun()
+
+            # Use applied search term to filter table, not instant input
+            search_term = applied_search
+
+            # Reinforce explicit search actions with a visible button in case the column button is missed.
+            if st.button("Apply delegate search", key="tab0_apply_search_fallback"):
+                st.session_state["tab0_search"] = str(search_input).strip()
+                # Preserve existing selected delegate on fallback apply, same as main apply path.
+                if hasattr(st, "experimental_rerun"):
+                    st.experimental_rerun()
+                elif hasattr(st, "rerun"):
+                    st.rerun()
 
             show_suspicious = search_col.checkbox(
                 "Show only suspicious delegates", value=False, key="tab0_only_suspicious"
@@ -271,6 +309,16 @@ def render(
             pattern_thresh = search_col.slider(
                 "Min unique patterns", 1, 10, 4, key="tab0_suspicious_pattern_thresh"
             )
+            auto_select_suspicious = search_col.checkbox(
+                "Auto-select first suspicious delegate when filters change",
+                value=False,
+                key="tab0_auto_select_suspicious",
+            )
+
+            if search_col.button("Clear filter", key="tab0_clear_search"):
+                _reset_view()
+                # Button press already causes a rerun; no explicit call needed.
+
 
         if show_suspicious:
             mask_suspicious = pd.Series(False, index=summary_disp.index)
@@ -287,12 +335,29 @@ def render(
 
         _PAGE_SIZE = 200
         if search_term.strip():
-            _mask = (
-                summary_disp[name_col].astype(str).str.contains(search_term, case=False, na=False)
-                | summary_disp["delegate_id"].astype(str).str.contains(search_term, case=False, na=False)
-            ) if name_col in summary_disp.columns else (
-                summary_disp["delegate_id"].astype(str).str.contains(search_term, case=False, na=False)
-            )
+            # Support wildcard tokens * and ? in search input.
+            wildcard_search = "*" in search_term or "?" in search_term
+            if wildcard_search:
+                pattern = re.escape(search_term.strip())
+                pattern = pattern.replace(r"\*", ".*").replace(r"\?", ".")
+                # Regex should match anywhere in the string by default
+                regex = f"{pattern}"
+                if name_col in summary_disp.columns:
+                    _mask = (
+                        summary_disp[name_col].astype(str).str.contains(regex, case=False, na=False, regex=True)
+                        | summary_disp["delegate_id"].astype(str).str.contains(regex, case=False, na=False, regex=True)
+                    )
+                else:
+                    _mask = summary_disp["delegate_id"].astype(str).str.contains(regex, case=False, na=False, regex=True)
+            else:
+                if name_col in summary_disp.columns:
+                    _mask = (
+                        summary_disp[name_col].astype(str).str.contains(search_term, case=False, na=False)
+                        | summary_disp["delegate_id"].astype(str).str.contains(search_term, case=False, na=False)
+                    )
+                else:
+                    _mask = summary_disp["delegate_id"].astype(str).str.contains(search_term, case=False, na=False)
+
             summary_disp = summary_disp[_mask]
         _total = len(summary_disp)
         summary_disp = summary_disp.head(_PAGE_SIZE).reset_index(drop=True)
@@ -301,20 +366,6 @@ def render(
         else:
             page_col.caption(f"{_total} delegate(s)")
         sel_id = st.session_state.get("sel_delegate_id")
-        def _reset_view() -> None:
-            """Reset selection/search/sort to configured defaults."""
-            cfg = st.session_state.get("config", {})
-            tab0_cfg = cfg.get("tab0", {})
-            st.session_state["sel_delegate_id"] = None
-            st.session_state["sidebar_delegate_name"] = "(none)"
-            st.session_state["tab0_search"] = tab0_cfg.get("search_term", "")
-            st.session_state["tab0_sort_mode"] = tab0_cfg.get(
-                "sort_mode", "Work queue (unreviewed first)"
-            )
-            st.session_state["tab0_select_col_pos"] = tab0_cfg.get("select_col_pos", 0)
-            # Keep config in sync (in case defaults were changed in config file)
-            st.session_state["config"] = cfg
-            save_config(cfg)
 
         if sel_id:
             row_match = summary[summary["delegate_id"] == sel_id]
@@ -334,6 +385,12 @@ def render(
             if st.button("Select first suspicious delegate", key="tab0_select_first_suspicious"):
                 first_id = str(summary_disp.iloc[0]["delegate_id"])
                 if first_id:
+                    st.session_state["sel_delegate_id"] = first_id
+                    st.rerun()
+
+            if st.session_state.get("tab0_auto_select_suspicious"):
+                first_id = str(summary_disp.iloc[0]["delegate_id"])
+                if first_id and st.session_state.get("sel_delegate_id") != first_id:
                     st.session_state["sel_delegate_id"] = first_id
                     st.rerun()
 
@@ -388,14 +445,19 @@ def render(
                     type=["numericColumn"],
                     filter="agNumberColumnFilter",
                 )
+        # When `sel_id` is stored as a string but the delegate_id column is numeric,
+        # match by string form so pre-selection works reliably.
+        sel_id_str = str(sel_id) if sel_id is not None else None
+        pre_sel_idx = []
+        if sel_id_str is not None:
+            matches = summary_disp[summary_disp["delegate_id"].astype(str) == sel_id_str]
+            if not matches.empty:
+                pre_sel_idx = [int(matches.index[0])]
+
         gb.configure_selection(
             selection_mode="single",
             use_checkbox=False,
-            pre_selected_rows=(
-                [int(summary_disp.index[summary_disp["delegate_id"] == sel_id][0])]
-                if sel_id is not None and sel_id in summary_disp["delegate_id"].values
-                else []
-            ),
+            pre_selected_rows=pre_sel_idx,
         )
         gb.configure_grid_options(suppressRowClickSelection=True)
         gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=25)
@@ -406,8 +468,6 @@ def render(
             "function(params){ return params.node.isSelected() ? {border: '2px solid #d32f2f'} : {}; }"
         )
 
-        if debug: print(f"  tab0 GridOptionsBuilder        {(_t.perf_counter()-_t0)*1000:8.1f} ms  rows={len(summary_disp)}")
-        _t0 = _t.perf_counter()
         response = AgGrid(
             summary_disp,
             gridOptions=grid_opts,
@@ -417,7 +477,6 @@ def render(
             allow_unsafe_jscode=True,
             key="tab0_aggrid",
         )
-        if debug: print(f"  tab0 AgGrid()                  {(_t.perf_counter()-_t0)*1000:8.1f} ms")
 
         # Sync the 'done' checkbox column back to the persisted reviewed set.
         # The grid sends back the full row data under 'data'.
@@ -430,7 +489,9 @@ def render(
             # rather than overwriting the whole reviewed set.
             modified = False
             for r in raw_data:
-                did = str(r.get("delegate_id"))
+                if not isinstance(r, dict):
+                    continue
+                did = str(r.get("delegate_id", ""))
                 done = r.get("done") in (True, "true", "True", 1, "1")
                 if done and did not in reviewed:
                     reviewed.add(did)
@@ -450,14 +511,34 @@ def render(
             rows = list(raw_sel) if raw_sel is not None else []
 
         if rows:
-            chosen_id = str(rows[0].get("delegate_id", ""))
+            first_row = rows[0]
+            if isinstance(first_row, dict):
+                chosen_id = str(first_row.get("delegate_id", ""))
+            else:
+                chosen_id = str(first_row)
             if chosen_id and chosen_id != st.session_state.get("sel_delegate_id"):
                 st.session_state["sel_delegate_id"] = chosen_id
-                # Rerun so df_delegate (computed at sheet.py top) picks up the
-                # new id before tabs 1-4 render.  The != guard prevents loops.
-                # NOTE: do NOT write to sidebar_delegate_name here — it's a
-                # widget-bound key and Streamlit forbids post-render writes.
-                st.rerun()
+                rerun_fn = None
+                if hasattr(st, "experimental_rerun"):
+                    rerun_fn = st.experimental_rerun
+                elif hasattr(st, "rerun"):
+                    rerun_fn = st.rerun
+
+                if rerun_fn is not None:
+                    try:
+                        rerun_fn()
+                    except Exception as e:
+                        st.warning(
+                            "Selected delegate updated, but auto rerun failed. "
+                            "Please click another tab or refresh the browser page. "
+                            f"(Detail: {type(e).__name__}: {e})"
+                        )
+                        st.info("Selected delegate updated; refresh tab status by clicking any tab or pressing browser refresh.")
+                else:
+                    st.warning(
+                        "Selected delegate updated; automatic rerun is unavailable in this Streamlit version. "
+                        "Please click another tab or refresh the browser page."
+                    )
 
         # Persist UI settings to disk so they survive restarts
         cfg = st.session_state.get("config", {})
