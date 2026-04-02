@@ -44,8 +44,9 @@ def render(
             )
             return
 
-        min_age = st.slider("Min plausible age to serve", 10, 25, MIN_AGE, key="min_age")
-        max_age = st.slider("Max plausible age to serve", 70, 100, MAX_AGE, key="max_age")
+        _age_col1, _age_col2 = st.columns(2)
+        min_age = _age_col1.number_input("Min plausible age to serve", min_value=0, max_value=150, value=MIN_AGE, step=1, key="min_age")
+        max_age = _age_col2.number_input("Max plausible age to serve", min_value=0, max_value=200, value=MAX_AGE, step=1, key="max_age")
 
         df_alive = df_delegate.copy()
 
@@ -58,9 +59,13 @@ def render(
         if "j" in df_alive.columns and not df_alive["j"].isna().all():
             year_min = int(df_alive["j"].min())
             year_max = int(df_alive["j"].max())
-            year_range = st.slider(
-                "Year range", year_min, year_max, (year_min, year_max), key="alive_year_range"
-            )
+            if year_min == year_max:
+                st.caption(f"Year: {year_min}")
+                year_range = (year_min, year_max)
+            else:
+                year_range = st.slider(
+                    "Year range", year_min, year_max, (year_min, year_max), key="alive_year_range"
+                )
             df_alive = df_alive[(df_alive["j"] >= year_range[0]) & (df_alive["j"] <= year_range[1])]
 
         df_alive["flag_young"] = df_alive["age_at_event"] < min_age

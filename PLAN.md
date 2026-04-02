@@ -333,3 +333,120 @@ streamlit run sheet.py
 | 2026-03-09 | Added `_read_df()` helper + rewrote `load_data()` to prefer `.parquet` sidecars over `.xlsx` |
 | 2026-03-09 | Added `@st.cache_data` to `enrich_persons_from_abbrd` and `build_merged`; both now return counters as tuple values instead of writing to module globals |
 | 2026-03-09 | `sheet.py`: unpacks tuple returns from cached functions; added "Max rows to analyse" sidebar selector (default All) that caps `df_view` after filters |
+
+---
+
+## Feature plan: Pattern-sequence suggestion engine ("🔍 Suggestions" tab)
+
+### Background and motivation
+
+After years of manual QA, **2,161 occurrences** in the dataset still carry a sentinel `delegate_id` (negative integers like `-1`, `-20`).  These are rows where the original NER or linking step failed to assign a confident identity.  Continuing to correct them by hand one-by-one is slow.
+
+But the dataset already contains by far the largest signal: **~428,000 labeled occurrences** — rows with a positive `delegate_id` — each one saying "this `pattern` string belongs to this delegate."  That is the primary corpus.  On top of it, `approved_corrections.json` (22,593 entries) and `staged_corrections.json` (41,745 entries) provide a human-verified refinement layer.
+
+### Three tiers of training signal
+
+| tier | source | size | confidence |
+|---|---|---|---|
+| 1 — corpus | all labeled rows in `df_merged` (`delegate_id > 0`) | ~428k rows | original assignment confidence |
+| 2 — approved | `approved_corrections.json` | 22,593 | high (human-reviewed) |
+| 3 — staged | `staged_corrections.json` | 41,745 | medium (staged, not yet approved) |
+
+The key store is built from **all three tiers**.  Tier 2 and 3 entries override tier 1 for any row they cover (a correction supersedes the original assignment).  This means the model already reflects everything that has been manually verified.
+
+### Why Q-K-V / attention framing fits
+
+Think of the problem as a retrieval task over a key-value store:
+
+| role | content |
+|---|---|
+| **Query** | the `pattern` of an unknown occurrence (+ year `j`, province if known) |
+| **Keys** | one embedding per known delegate, built from all pattern strings across all three tiers |
+| **Values** | `delegate_id`, `fullname`, province, active year range (`first_year`–`last_year`) |
+
+Attention score = cosine similarity(query embedding, key embedding), then adjusted by two hard filters:
+
+- **Temporal gate**: if the query year `j` falls outside the delegate's known active range (+ a ±10 year tolerance), the candidate score is set to 0.
+- **Province boost**: if province is known for both query and candidate, a match adds a small additive bonus (e.g. +0.05) before re-ranking.
+
+This is the same mechanism as a nearest-neighbour retrieval transformer, but without the overhead of a neural model: a **character n-gram TF-IDF vectorizer** (ngram\_range=(2,4)) over Dutch surname fragments is fast, interpretable, and well-suited to the short, noisy patterns in this dataset.
+
+Character n-grams are important here because:
+- Dutch names have many variant spellings (`Gockinga` / `Gocknga` / `Gock`)
+- Diacritics and OCR noise create systematic sub-word variation
+- A bigram/trigram over characters captures these edits even when the full token doesn't match
+
+### Active learning loop
+
+Every user decision is a new label that feeds back into the system — but always via the **existing reversible corrections pipeline**, never by writing directly to `approved_corrections.json`:
+
+1. **User accepts suggestion** → `(row_index → delegate_id)` is written into `st.session_state["corrections"]` (active, in-RAM corrections) via the same `save_correction()` function used everywhere else. It is immediately visible as an active correction in the sidebar, and can be staged, approved, or reverted using all the existing sidebar workflow buttons.
+2. **Rerun** → `build_merged()` picks up the active corrections → `apply_corrections()` bakes them in → `build_suggestion_store()` rebuilds with the updated corpus (cache-invalidated by the changed `df_merged`) → future similar queries immediately reflect the accepted assignment.
+3. **User rejects a suggestion** → stored in `st.session_state["skipped_suggestions"]` (a set of row indices) so the same candidate is hidden for the rest of the session, without writing anything to disk.
+4. **To undo an accepted suggestion**: use the existing "Delete selected row(s)" button in the sidebar corrections table — same as undoing any manual correction.
+
+There is no explicit training loop, no gradient, no stored model file.  The "learning" is the cumulative labeled corpus that grows as corrections move through the pipeline.
+
+### Implementation plan
+
+**Step 1 — `utils.py`: `build_suggestion_store(df_merged)`**
+
+- Input: `df_merged` (cached DataFrame, already has corrections applied via `apply_corrections()`).
+- Separate rows into labeled (`delegate_id > 0`) and unresolved (`delegate_id < 0`).
+- For each positive `delegate_id`, collect all `pattern` values across all rows → join into one document per delegate. This includes original assignments AND any approved/staged corrections already baked into `df_merged`.
+- Fit `TfidfVectorizer(analyzer='char_wb', ngram_range=(2,4), min_df=1)` on those documents.
+- Also record `first_year`, `last_year`, and `provincie` per delegate (from the summary) for the temporal gate and province constraint. The province stored in the key metadata is the delegate's home `provincie` from `df_p`; the province used on the query side is `namens` from the occurrence row (more precise: it records which province they were representing at that specific meeting).
+- Separate `class == 'president'` rows from `class == 'delegate'` rows so the query function knows when to skip province filtering.
+- Return `(vectorizer, key_matrix[n_delegates × vocab], id_index[n_delegates], meta_df)` as a named tuple.
+- Decorated with `@st.cache_data` — cache key is the shape+hash of `df_merged`, so it rebuilds automatically when corrections change the merge.
+
+**Step 2 — `utils.py`: `query_suggestions(store, query_df, top_k=3)`**
+
+- Input: the store named tuple + a DataFrame of unresolved rows (each with `pattern`, `j`, optionally `provincie`).
+- Transforms query patterns with the fitted vectorizer → cosine similarity against key matrix (scipy sparse, fast even at 428k rows).
+- **Temporal gate**: zero out scores where query year `j` falls outside `[first_year - 10, last_year + 10]` for the candidate.
+- **Province constraint** (only when `class == 'delegate'`): the `namens` column records which province the occurrence is *on behalf of* at that specific meeting — this is a stronger signal than the person's home `provincie`. If `namens` is a recognised province name, candidates whose `provincie` does not match are zeroed out. This constraint is **skipped entirely when `class == 'president'`**, because the president signs first irrespective of province rotation.
+- Returns a DataFrame with columns: `row_index`, `pattern`, `j`, `class`, `namens`, `cand_1`, `score_1`, `name_1`, `cand_2`, `score_2`, `name_2`, `cand_3`, `score_3`, `name_3`.
+- Pure numpy/scipy, no Streamlit calls.
+
+> **President exception:** `class == 'president'` rows (22,551 in total) are signed by whoever held the weekly rotating presidency — they could come from any province. Province-based filtering is therefore disabled for these rows. The temporal gate still applies.
+
+**Step 3 — `tabs/tab_suggest.py`: new tab**
+
+Layout:
+```
+🔍 Suggestions
+  ── banner: "N unresolved occurrences · M have a suggestion with score ≥ threshold"
+  ── slider: "Minimum confidence" (0.0 – 1.0, default 0.3)
+  ── AgGrid table (one row per unresolved occurrence):
+       row | year | pattern | candidate 1 (score) | candidate 2 | candidate 3
+  ── "✅ Accept top suggestion for selected rows" button
+  ── "🚫 Skip / flag as unresolvable" button
+```
+Accepted suggestions are written via `save_correction()` into `st.session_state["corrections"]` (active/RAM tier) — exactly the same path as a manual correction in any other tab.  They appear immediately in the sidebar correction table and can be staged, approved, reverted, or deleted from there.  
+Skipped rows are stored in session state (`st.session_state["skipped_suggestions"]`) as a set of row indices, and hidden from the table for the rest of the session — nothing is written to disk.
+
+**Step 4 — `sheet.py`: wire up the tab**
+
+Add `"🔍 Suggestions"` to `_TAB_LABELS` (between Overview and Alive Check) and unpack the extra tab variable.  Pass `summary`, `df_merged`, `df_p`, `suggestion_store` to the render call.
+
+**Step 5 — `sheet.py`: pre-compute suggestion store**
+
+```python
+suggestion_store = build_suggestion_store(df_merged)
+```
+Called once after `build_merged`, before the tab block.  The `@st.cache_data` decorator means it only runs when `df_merged` changes.
+
+### Files to change
+
+| file | what changes |
+|---|---|
+| `utils.py` | add `build_suggestion_store()` and `query_suggestions()` |
+| `tabs/tab_suggest.py` | new file — render function for the Suggestions tab |
+| `sheet.py` | add tab label, unpack tab, pre-compute store, call render |
+
+### Dependencies
+
+- `scikit-learn` — TF-IDF vectorizer + cosine similarity (already in venv: used in tab2 pattern anomalies)
+- `scipy` — sparse matrix ops (pulled in by scikit-learn)
+- No new packages needed

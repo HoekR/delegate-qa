@@ -69,55 +69,6 @@ def render(
             "Changes are applied to the app immediately and used in all other tabs."
         )
 
-        # Delegate selector/search (added per request)
-        st.markdown("---")
-        st.subheader("Find and select delegate")
-
-        cfg = st.session_state.get("config", {})
-        tab8_cfg = cfg.setdefault("tab8", {})
-        tab8_cfg.setdefault("search_term", "")
-
-        if "tab8_search" not in st.session_state:
-            st.session_state["tab8_search"] = tab8_cfg.get("search_term", "")
-
-        search_term = st.text_input(
-            "ID or name pattern (use * and ?)",
-            key="tab8_search_input",
-            value=st.session_state.get("tab8_search", ""),
-        )
-
-        cols = st.columns([3, 1])
-        with cols[0]:
-            if st.button("Apply search", key="tab8_apply_search"):
-                target = str(search_term).strip()
-                st.session_state["tab8_search"] = target
-                tab8_cfg["search_term"] = target
-                st.session_state["config"] = cfg
-                st.session_state["delegates_search"] = target
-                if st.session_state.get("DEBUG"):
-                    msg = f"tab8_apply_search: {target}"
-                    st.session_state["debug_last_action"] = msg
-                    history = st.session_state.get("debug_history", [])
-                    history.append(msg)
-                    st.session_state["debug_history"] = history
-                if hasattr(st, "experimental_rerun"):
-                    st.experimental_rerun()
-                else:
-                    st.rerun()
-        with cols[1]:
-            if st.button("Clear search", key="tab8_clear_search"):
-                st.session_state["tab8_search"] = ""
-                tab8_cfg["search_term"] = ""
-                st.session_state["config"] = cfg
-                st.session_state["delegates_search"] = ""
-                st.session_state["sel_delegate_id"] = None
-                if hasattr(st, "experimental_rerun"):
-                    st.experimental_rerun()
-                else:
-                    st.rerun()
-
-        st.markdown("---")
-
 
         edits = load_delegate_edits()
 
@@ -412,7 +363,7 @@ def render(
         response = AgGrid(
             df_display,
             gridOptions=grid_opts,
-            update_mode=GridUpdateMode.MODEL_CHANGED,
+            update_mode=GridUpdateMode.VALUE_CHANGED,
             height=500,
             fit_columns_on_grid_load=True,
             key="delegates_grid",

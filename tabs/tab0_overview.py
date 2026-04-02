@@ -66,26 +66,14 @@ def render(
             st.warning("No data after merging. Ensure `delegate_id` exists in both files.")
             st.stop()
 
-        # ------------------------------------------------------------------ #
-        # Delegate summary grid (AgGrid)                                       #
-        # Row-click persists across reruns and keeps the highlight.           #
-        # Selection is written to session_state["sel_delegate_id"] so all     #
-        # other tabs update on the next interaction.                          #
-        # ------------------------------------------------------------------ #
-        st.subheader("Delegate summary")
-
-        # Mark sandboxed rows in a display copy — original summary is untouched
+        # Always initialize summary_disp at the start
         summary_disp = summary.copy()
-        # Ensure delegate_id comparisons are string-based so reviewed IDs match
         if "delegate_id" in summary_disp.columns:
             summary_disp["delegate_id"] = summary_disp["delegate_id"].astype(str)
         _reviewed = {str(x) for x in (reviewed or set())}
         _corrected = corrected_delegate_ids or set()
-
-        # Add a dedicated column to persist review status (checkbox).
-        # This mirrors 'status' but makes it easy to toggle and persists to disk.
         summary_disp["done"] = summary_disp["delegate_id"].isin(_reviewed)
-        # Status column: drives visual scanning and can be used for "work-queue" ordering
+
         def _status(did: str) -> str:
             did = str(did)
             if did in _reviewed:
@@ -96,6 +84,16 @@ def render(
 
         summary_disp["status"] = summary_disp["delegate_id"].apply(_status)
 
+        sel_id = st.session_state.get("sel_delegate_id")
+        if sel_id:
+            _sel_name = ""
+            if not df_p.empty and name_col in df_p.columns:
+                _match = df_p[df_p["delegate_id"].astype(str) == str(sel_id)]
+                if not _match.empty:
+                    _sel_name = str(_match.iloc[0][name_col])
+            _sel_label = f"**{sel_id}**" if not _sel_name else f"**{_sel_name}** (ID: {sel_id})"
+            st.info(f"🔎 Currently inspecting delegate: {_sel_label}")
+
         # Persist UI settings (sort/search/select position) via app config.
         config = st.session_state.get("config", {})
         tab0_cfg = config.setdefault("tab0", {})
@@ -104,7 +102,6 @@ def render(
         tab0_cfg.setdefault("search_term", "")
         tab0_cfg.setdefault("select_col_pos", 0)
 
-        # Ensure widget defaults are loaded from config the first time.
         if "tab0_sort_primary" not in st.session_state:
             st.session_state["tab0_sort_primary"] = tab0_cfg["sort_primary"]
         if "tab0_sort_secondary" not in st.session_state:
@@ -243,57 +240,20 @@ def render(
             # Persist search term in config
             cfg = st.session_state.get("config", {})
             tab0_cfg = cfg.setdefault("tab0", {})
-            if "tab0_search_force" in st.session_state:
-                search_term = st.session_state.pop("tab0_search_force")
-                st.session_state["tab0_search"] = search_term
-            else:
-                search_term = st.session_state.get("tab0_search", tab0_cfg.get("search_term", ""))
+            search_term = st.session_state.get("tab0_search", tab0_cfg.get("search_term", ""))
 
-            search_input = st.session_state.get("tab0_search_input", "")
-            applied_search = st.session_state.get("tab0_search", "")
-
-            search_input = search_col.text_input(
-                "Filter delegates",
-                value=search_input,
-                placeholder="name or ID…",
-                key="tab0_search_input",
-                label_visibility="collapsed",
+            search_term = search_col.text_input(
+                "Filter delegates", value=search_term, placeholder="name or ID…",
+                key="tab0_search", label_visibility="collapsed",
             )
-
-            if search_col.button("Apply search", key="tab0_apply_search"):
-                st.session_state["tab0_search"] = str(search_input).strip()
-                # Preserve existing selected delegate to avoid auto-clearing when search changes.
-                if hasattr(st, "experimental_rerun"):
-                    st.experimental_rerun()
-                elif hasattr(st, "rerun"):
-                    st.rerun()
-
-            if search_col.button("Clear name and selection", key="tab0_clear_name"):
-                # Avoid writing widget key directly; it is controlled by the input widget.
-                st.session_state["tab0_search"] = ""
-                st.session_state["sel_delegate_id"] = None
-                if hasattr(st, "experimental_rerun"):
-                    st.experimental_rerun()
-                elif hasattr(st, "rerun"):
-                    st.rerun()
-
-            # Use applied search term to filter table, not instant input
-            search_term = applied_search
-
-            # Reinforce explicit search actions with a visible button in case the column button is missed.
-            if st.button("Apply delegate search", key="tab0_apply_search_fallback"):
-                st.session_state["tab0_search"] = str(search_input).strip()
-                # Preserve existing selected delegate on fallback apply, same as main apply path.
-                if hasattr(st, "experimental_rerun"):
-                    st.experimental_rerun()
-                elif hasattr(st, "rerun"):
-                    st.rerun()
+            if search_col.button("Clear filter", key="tab0_clear_search"):
+                _reset_view()
+                st.rerun()
 
             show_suspicious = search_col.checkbox(
                 "Show only suspicious delegates", value=False, key="tab0_only_suspicious"
             )
 
-            # Criteria for suspicious delegates
             suspicious_alive = search_col.checkbox(
                 "Include alive/age flags", value=True, key="tab0_suspicious_alive"
             )
@@ -309,16 +269,6 @@ def render(
             pattern_thresh = search_col.slider(
                 "Min unique patterns", 1, 10, 4, key="tab0_suspicious_pattern_thresh"
             )
-            auto_select_suspicious = search_col.checkbox(
-                "Auto-select first suspicious delegate when filters change",
-                value=False,
-                key="tab0_auto_select_suspicious",
-            )
-
-            if search_col.button("Clear filter", key="tab0_clear_search"):
-                _reset_view()
-                # Button press already causes a rerun; no explicit call needed.
-
 
         if show_suspicious:
             mask_suspicious = pd.Series(False, index=summary_disp.index)
@@ -328,36 +278,17 @@ def render(
                 mask_suspicious |= summary_disp["max_gap_years"].fillna(0) >= gap_years_threshold
             if suspicious_patterns and "n_patterns" in summary_disp.columns:
                 mask_suspicious |= summary_disp["n_patterns"].fillna(0) >= pattern_thresh
-
-            # Always keep reviewed rows visible (even if not suspicious)
             mask_reviewed = summary_disp["status"] == "✅"
             summary_disp = summary_disp[mask_suspicious | mask_reviewed]
 
         _PAGE_SIZE = 200
         if search_term.strip():
-            # Support wildcard tokens * and ? in search input.
-            wildcard_search = "*" in search_term or "?" in search_term
-            if wildcard_search:
-                pattern = re.escape(search_term.strip())
-                pattern = pattern.replace(r"\*", ".*").replace(r"\?", ".")
-                # Regex should match anywhere in the string by default
-                regex = f"{pattern}"
-                if name_col in summary_disp.columns:
-                    _mask = (
-                        summary_disp[name_col].astype(str).str.contains(regex, case=False, na=False, regex=True)
-                        | summary_disp["delegate_id"].astype(str).str.contains(regex, case=False, na=False, regex=True)
-                    )
-                else:
-                    _mask = summary_disp["delegate_id"].astype(str).str.contains(regex, case=False, na=False, regex=True)
-            else:
-                if name_col in summary_disp.columns:
-                    _mask = (
-                        summary_disp[name_col].astype(str).str.contains(search_term, case=False, na=False)
-                        | summary_disp["delegate_id"].astype(str).str.contains(search_term, case=False, na=False)
-                    )
-                else:
-                    _mask = summary_disp["delegate_id"].astype(str).str.contains(search_term, case=False, na=False)
-
+            _mask = (
+                summary_disp[name_col].astype(str).str.contains(search_term, case=False, na=False)
+                | summary_disp["delegate_id"].astype(str).str.contains(search_term, case=False, na=False)
+            ) if name_col in summary_disp.columns else (
+                summary_disp["delegate_id"].astype(str).str.contains(search_term, case=False, na=False)
+            )
             summary_disp = summary_disp[_mask]
         _total = len(summary_disp)
         summary_disp = summary_disp.head(_PAGE_SIZE).reset_index(drop=True)
@@ -365,34 +296,6 @@ def render(
             page_col.caption(f"Showing {_PAGE_SIZE} of {_total} — type a name to narrow")
         else:
             page_col.caption(f"{_total} delegate(s)")
-        sel_id = st.session_state.get("sel_delegate_id")
-
-        if sel_id:
-            row_match = summary[summary["delegate_id"] == sel_id]
-            label = (
-                str(row_match.iloc[0][name_col])
-                if not row_match.empty and name_col in row_match.columns
-                else sel_id
-            )
-            col_info, col_clear = st.columns([6, 1])
-            col_info.info(f"Selected: **{label}**")
-            col_clear.button("✖ Clear", key="tab0_clear_sel", on_click=_reset_view)
-        else:
-            st.caption("👆 Click a row to select a delegate — tabs 1–4 will show only that person.")
-
-        # Quick jump button for a suspicious delegate (first row in filtered view)
-        if show_suspicious and _total > 0:
-            if st.button("Select first suspicious delegate", key="tab0_select_first_suspicious"):
-                first_id = str(summary_disp.iloc[0]["delegate_id"])
-                if first_id:
-                    st.session_state["sel_delegate_id"] = first_id
-                    st.rerun()
-
-            if st.session_state.get("tab0_auto_select_suspicious"):
-                first_id = str(summary_disp.iloc[0]["delegate_id"])
-                if first_id and st.session_state.get("sel_delegate_id") != first_id:
-                    st.session_state["sel_delegate_id"] = first_id
-                    st.rerun()
 
         # Build AgGrid options
         import time as _t

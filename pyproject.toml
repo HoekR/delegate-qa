@@ -13,4 +13,5 @@ dependencies = [
     "watchdog>=3.0",
     "pyarrow>=14.0",
     "streamlit-aggrid>=0.3.4",
+    "scikit-learn>=1.8.0",
 ]

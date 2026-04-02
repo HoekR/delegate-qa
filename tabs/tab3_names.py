@@ -43,7 +43,7 @@ def render(
         # name_mismatch is precomputed per delegate in build_merged — no need
         # to recompute it here.  Fall back to inline check only if missing.
         if "name_mismatch" in df_delegate.columns:
-            mismatch = df_delegate.loc[df_delegate["name_mismatch"].astype(bool)]
+            mismatch = df_delegate.loc[df_delegate["name_mismatch"].fillna(False).astype(bool)]
         else:
             _gn = df_delegate["geslachtsnaam"].astype(str).replace({"nan": ""})
             _pl = df_delegate["pattern"].astype(str).str.lower().replace({"nan": ""})

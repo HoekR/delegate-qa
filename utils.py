@@ -302,6 +302,28 @@ def save_pattern_status(status: dict[str, bool]) -> None:
     PATTERN_STATUS_FILE.write_text(json.dumps({str(k): bool(v) for k, v in status.items()}, indent=2))
 
 
+# ---------------------------------------------------------------------------
+# FLAGGED PATTERNS  (patterns that cannot be resolved to a delegate)
+# ---------------------------------------------------------------------------
+
+FLAGGED_PATTERNS_FILE = _WS / "flagged_patterns.json"
+
+
+def load_flagged_patterns() -> set[str]:
+    """Return the set of pattern strings flagged as unresolvable."""
+    if FLAGGED_PATTERNS_FILE.exists():
+        try:
+            return set(json.loads(FLAGGED_PATTERNS_FILE.read_text()))
+        except Exception:
+            return set()
+    return set()
+
+
+def save_flagged_patterns(patterns: set[str]) -> None:
+    """Persist the complete set of flagged patterns."""
+    FLAGGED_PATTERNS_FILE.write_text(json.dumps(sorted(patterns), indent=2))
+
+
 def save_reviewed(reviewed: set[str]) -> None:
     """Persist the reviewed delegate IDs.
 
@@ -676,15 +698,37 @@ def _read_df(candidates: list[Path]) -> tuple[pd.DataFrame, Path]:
     )
 
 
+def _strip_excel_escapes(df: pd.DataFrame) -> pd.DataFrame:
+    """Remove openpyxl XML escape sequences from string columns.
+
+    Excel cells that contain embedded carriage returns (Alt+Enter line breaks)
+    are encoded by openpyxl as ``_x000D_`` followed by a newline.  Strip those
+    sequences and collapse any resulting runs of whitespace so names like
+    ``Cock_x000D_\\nCock, Bernardus`` become ``Cock, Bernardus``.
+    """
+    for col in df.select_dtypes(include="object").columns:
+        df[col] = (
+            df[col]
+            .astype(str)
+            .str.replace(r"_x000D_\s*", " ", regex=True)
+            .str.replace(r"\s+", " ", regex=True)
+            .str.strip()
+            .where(df[col].notna(), other=None)
+        )
+    return df
+
+
 def _load_data_uncached(source_mtimes: tuple[float, ...] = ()) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame | None]:
     """Load data directly from disk without any Streamlit caching."""
 
     df_p, _ = _read_df(PERSONS_CANDIDATES)
+    df_p = _strip_excel_escapes(df_p)
     if "delegate_id" in df_p.columns:
         df_p["delegate_id"] = pd.to_numeric(df_p["delegate_id"], errors="coerce").astype("Int64")
         df_p["delegate_id"] = df_p["delegate_id"].astype(str)
 
     df_i, _ = _read_df(OCCURRENCES_CANDIDATES)
+    df_i = _strip_excel_escapes(df_i)
     if "delegate_id" in df_i.columns:
         df_i["delegate_id"] = pd.to_numeric(df_i["delegate_id"], errors="coerce").astype("Int64")
         df_i["delegate_id"] = df_i["delegate_id"].astype(str)
@@ -709,6 +753,7 @@ def _load_data_uncached(source_mtimes: tuple[float, ...] = ()) -> tuple[pd.DataF
                 df_abbrd = pd.read_excel(abbrd_path)
 
         df_abbrd.columns = df_abbrd.columns.str.strip()
+        df_abbrd = _strip_excel_escapes(df_abbrd)
     return df_p, df_i, df_abbrd
 
 
@@ -1368,3 +1413,194 @@ def build_sidebar_options(
         else 1800
     )
     return delegate_options, provinces, ymin, ymax
+
+
+# ---------------------------------------------------------------------------
+# Suggestion store  (Q-K-V pattern retrieval)
+# ---------------------------------------------------------------------------
+
+_KNOWN_PROVINCES: frozenset[str] = frozenset([
+    "Gelderland", "Holland", "Zeeland", "Utrecht",
+    "Friesland", "Overijssel", "Groningen",
+])
+
+
+@st.cache_data(hash_funcs=_HASH_FUNCS, show_spinner="Building suggestion store…")
+def build_suggestion_store(df_merged: pd.DataFrame) -> dict:
+    """Build a dual TF-IDF store from all labeled (delegate_id > 0) rows.
+
+    Two complementary vectorizers are fitted on the same corpus:
+
+    char_wb (ngram 2-4)  – character n-grams inside word boundaries.
+      Catches OCR noise and spelling variants within a token
+      (e.g. 'Gockinga' ↔ 'Gocknga', 'Goes' ↔ 'Goos').  High recall
+      for corrupted patterns.
+
+    word (ngram 1-2)  – split on whitespace/punctuation, lowercase.
+      Catches exact surname token matches even when surrounding
+      prepositional tokens ('van', 'de', 'der') vary.  High precision
+      for intact tokens.  Subtoken matching: single tokens like 'Goes'
+      from 'van der Goes' score well against any key document that
+      contains 'Goes' as a word, regardless of the surrounding tokens.
+
+    Scores are combined as: 0.6 × sim_char + 0.4 × sim_word.
+    This gives full benefit of intra-token noise tolerance while still
+    rewarding exact surname hits.
+
+    Returns a plain dict (trivially picklable by @st.cache_data):
+      {
+        "vec_char":       TfidfVectorizer (char_wb, fitted),
+        "vec_word":       TfidfVectorizer (word, fitted),
+        "key_char":       scipy sparse [n_delegates × char_vocab],
+        "key_word":       scipy sparse [n_delegates × word_vocab],
+        "id_index":       list[str] – matrix row i → delegate_id,
+        "meta":           DataFrame – delegate_id, first_year, last_year, provincie,
+      }
+    Returns {} if there is no usable labeled data.
+    """
+    try:
+        from sklearn.feature_extraction.text import TfidfVectorizer
+    except ImportError:
+        return {}
+
+    if df_merged.empty or "pattern" not in df_merged.columns:
+        return {}
+
+    ids_num = pd.to_numeric(df_merged["delegate_id"], errors="coerce")
+    labeled = df_merged[ids_num > 0].copy()
+    if labeled.empty:
+        return {}
+
+    # One document per delegate – join all pattern strings
+    docs = (
+        labeled.groupby("delegate_id", observed=True)["pattern"]
+        .agg(lambda s: " ".join(s.dropna().astype(str)))
+        .reset_index()
+        .rename(columns={"pattern": "doc"})
+    )
+
+    # Character n-gram vectorizer – intra-token noise tolerance
+    vec_char = TfidfVectorizer(
+        analyzer="char_wb", ngram_range=(2, 4), min_df=1, sublinear_tf=True
+    )
+    key_char = vec_char.fit_transform(docs["doc"])
+
+    # Word / subtoken vectorizer – exact surname token matching
+    vec_word = TfidfVectorizer(
+        analyzer="word",
+        token_pattern=r"(?u)\b\w+\b",
+        ngram_range=(1, 2),
+        min_df=1,
+        sublinear_tf=True,
+        lowercase=True,
+    )
+    key_word = vec_word.fit_transform(docs["doc"])
+
+    # Per-delegate metadata used for temporal gate + province constraint
+    meta = labeled.groupby("delegate_id", observed=True).agg(
+        first_year=("j", "min"),
+        last_year=("j", "max"),
+        provincie=(
+            "provincie",
+            lambda s: s.dropna().mode().iloc[0] if s.notna().any() else "",
+        ),
+    ).reset_index()
+    meta = docs[["delegate_id"]].merge(meta, on="delegate_id", how="left")
+    meta["provincie"] = meta["provincie"].fillna("")
+
+    return {
+        "vec_char": vec_char,
+        "vec_word": vec_word,
+        "key_char": key_char,
+        "key_word": key_word,
+        "id_index": docs["delegate_id"].tolist(),
+        "meta": meta,
+    }
+
+
+def query_suggestions(
+    store: dict,
+    query_df: pd.DataFrame,
+    top_k: int = 3,
+    year_tolerance: int = 10,
+    min_score: float = 0.0,
+) -> pd.DataFrame:
+    """Score unresolved occurrences against the key store.
+
+    For each query row:
+      1. Cosine similarity of pattern embedding vs all key vectors.
+      2. Temporal gate  – zero candidates whose active range doesn't overlap
+         query year ± year_tolerance.
+      3. Province constraint (delegate rows only) – if namens is a known
+         province, zero candidates whose provincie doesn't match.
+         Skipped entirely when class == 'president'.
+      4. Return top_k survivors (score > 0) as candidate columns.
+
+    Returns a DataFrame with columns:
+      orig_idx, pattern, j, class, namens,
+      cand_1 … cand_{top_k}, score_1 … score_{top_k}
+    Rows where all candidates score 0 are included with None candidates so
+    the user can see them and mark them unresolvable.
+    """
+    try:
+        from sklearn.metrics.pairwise import cosine_similarity
+    except ImportError:
+        return pd.DataFrame()
+
+    if not store or query_df.empty:
+        return pd.DataFrame()
+
+    vec_char = store["vec_char"]
+    vec_word = store["vec_word"]
+    key_char = store["key_char"]
+    key_word = store["key_word"]
+    id_index = store["id_index"]
+    meta: pd.DataFrame = store["meta"]
+
+    first_years = pd.to_numeric(meta["first_year"], errors="coerce").to_numpy()
+    last_years = pd.to_numeric(meta["last_year"], errors="coerce").to_numpy()
+    provs = meta["provincie"].fillna("").to_numpy()
+
+    patterns = query_df["pattern"].fillna("").astype(str).tolist()
+
+    # Combined score: 60% character n-gram + 40% word subtoken
+    sim_char = cosine_similarity(vec_char.transform(patterns), key_char)
+    sim_word = cosine_similarity(vec_word.transform(patterns), key_word)
+    sim = 0.6 * sim_char + 0.4 * sim_word  # [n_queries × n_delegates]
+
+    rows = []
+    for i, (orig_idx, occ) in enumerate(query_df.iterrows()):
+        scores = sim[i].copy()
+
+        # 1. Temporal gate
+        q_year = pd.to_numeric(occ.get("j"), errors="coerce")
+        if not pd.isna(q_year):
+            scores[(q_year < (first_years - year_tolerance)) |
+                   (q_year > (last_years + year_tolerance))] = 0.0
+
+        # 2. Province constraint – skip for president rows
+        if str(occ.get("class", "")).lower() != "president":
+            q_prov = str(occ.get("namens", "")).strip()
+            if q_prov in _KNOWN_PROVINCES:
+                scores[provs != q_prov] = 0.0
+
+        top_idx = scores.argsort()[::-1][:top_k]
+        row: dict = {
+            "orig_idx": orig_idx,
+            "pattern": occ.get("pattern", ""),
+            "j": occ.get("j"),
+            "class": occ.get("class", ""),
+            "namens": occ.get("namens", ""),
+        }
+        for rank in range(1, top_k + 1):
+            k = top_idx[rank - 1]
+            sc = float(scores[k])
+            if sc >= min_score and sc > 0:
+                row[f"cand_{rank}"] = id_index[k]
+                row[f"score_{rank}"] = round(sc, 3)
+            else:
+                row[f"cand_{rank}"] = None
+                row[f"score_{rank}"] = 0.0
+        rows.append(row)
+
+    return pd.DataFrame(rows)

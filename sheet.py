@@ -34,6 +34,7 @@ from utils import (
     build_merged,
     build_name_to_id,
     build_sidebar_options,
+    build_suggestion_store,
     enrich_persons_from_abbrd,
     get_delegate_slice,
     load_config,
@@ -68,6 +69,7 @@ from tabs import (
     tab4_timeline,
     tab7_settings,
     tab8_delegates,
+    tab_suggest,
 )
 # ---------------------------------------------------------------------------
 # DEBUG FLAG  — set env var to enable timing output in the terminal
@@ -213,7 +215,7 @@ def _timed(name, fn):
     return result
 
 if DEBUG:
-    print(f"--- rerun {_time.strftime('%H:%M:%S')} sel={st.session_state.get('sel_delegate_id')} ---")
+    print(f"--- rerun {_time.strftime('%H:%M:%S')} sel={st.session_state.get('sel_delegate_id')} active_tab={st.session_state.get('active_tab')!r} ---")
 
 try:
     df_p, df_i, df_abbrd = _timed("load_data()", lambda: load_data(source_mtimes()))
@@ -230,6 +232,20 @@ try:
         (c for c in ("fullname", "full_name", "naam", "name") if c in df_p.columns),
         df_p.columns[0] if not df_p.empty else "fullname",
     )
+
+    # Apply RAM corrections to df_i BEFORE build_merged filters sentinel rows.
+    # This ensures occurrences where a suggestion was accepted no longer appear
+    # as unresolved on the next rerun (they get a positive delegate_id and flow
+    # through the normal merge path).
+    _corrections = st.session_state.get("corrections", {})
+    _cfg = st.session_state.get("config", {})
+    if _corrections:
+        df_i = apply_corrections(df_i, _corrections, config=_cfg)
+
+    # Capture unresolved rows (sentinel IDs -1/-20) before build_merged removes them.
+    _sentinel_mask = df_i["delegate_id"].astype(str).isin({"-1", "-20"})
+    df_unresolved = df_i[_sentinel_mask].copy()
+
     df_merged, n_placeholder_rows, n_remapped_rows, summary = _timed(
         "build_merged()",
         lambda: build_merged(
@@ -239,16 +255,14 @@ try:
         ),
     )
     # Apply pending corrections to all derived views so tabs reflect changes immediately.
-    if st.session_state.get("corrections"):
-        corrections = st.session_state["corrections"]
-        cfg = st.session_state.get("config", {})
-        df_merged = apply_corrections(df_merged, corrections, config=cfg)
+    if _corrections:
+        df_merged = apply_corrections(df_merged, _corrections, config=_cfg)
         # Recompute summary from corrected merged rows (do not apply corrections by summary index)
         summary = _compute_delegate_summary(df_merged, df_p, name_col)
     load_error: str | None = None
 except Exception as exc:
     load_error = str(exc)
-    df_p = df_i = df_merged = pd.DataFrame()
+    df_p = df_i = df_merged = df_unresolved = pd.DataFrame()
     df_bio = None
     df_abbrd = None
     n_enriched_persons = n_placeholder_rows = n_remapped_rows = 0
@@ -263,6 +277,12 @@ prov_col = next(
 _delegate_options, *_ = _timed(
     "build_sidebar_options()",
     lambda: build_sidebar_options(df_p, df_merged, name_col, prov_col),
+)
+
+# Pre-compute suggestion store — cached; rebuilds only when df_merged changes
+suggestion_store = _timed(
+    "build_suggestion_store()",
+    lambda: build_suggestion_store(df_merged),
 )
 
 # ---------------------------------------------------------------------------
@@ -312,6 +332,26 @@ with st.sidebar:
         st.cache_data.clear()
         # A button press triggers a rerun automatically.
 
+    # ── Task progress ──────────────────────────────────────────────────────
+    with st.expander("📊 Task progress", expanded=True):
+        _n_active   = len(st.session_state.get("corrections", {}))
+        _n_staged   = len(st.session_state.get("staged_corrections", {}))
+        _n_approved = len(st.session_state.get("approved_corrections", {}))
+        _n_reviewed = len(st.session_state.get("reviewed", []))
+        _n_total    = len(df_merged) if not df_merged.empty else 0
+        _n_done     = _n_staged + _n_approved
+        _pct        = round(100 * _n_done / _n_total, 1) if _n_total else 0.0
+
+        _pc1, _pc2 = st.columns(2)
+        _pc1.metric("🖊 Active (RAM)", _n_active)
+        _pc2.metric("⏳ Staged", _n_staged)
+        _pc1.metric("✅ Approved", _n_approved)
+        _pc2.metric("👁 Reviewed delegates", _n_reviewed)
+        st.progress(
+            min(_pct / 100, 1.0),
+            text=f"{_pct}% corrected — {_n_done:,} / {_n_total:,} occurrences",
+        )
+
     st.subheader("Corrections workflow")
     st.caption("Active corrections influence all tabs; staged corrections are saved separately and can be applied manually.")
     if st.session_state.get("debug_last_action"):
@@ -320,6 +360,7 @@ with st.sidebar:
         st.markdown("### Debug history (last 20)")
         for entry in st.session_state["debug_history"][-20:]:
             st.write(f"- {entry}")
+    # st.caption(f"active_tab in session: {st.session_state.get('active_tab')!r}")
 
     current_corr = st.session_state.get("corrections", {})
     disk_loaded = st.session_state.get("corrections_disk_loaded", 0)
@@ -636,18 +677,22 @@ def _render_timed(name, fn):
     fn()
     print(f"  render {name:<25} {(_time.perf_counter()-_t0)*1000:8.1f} ms")
 
-if "active_tab" not in st.session_state:
-    st.session_state["active_tab"] = 0
-
-tab0, tab1, tab2, tab3, tab4, tab8, tab7 = st.tabs([
+_TAB_LABELS = [
     "📋 Overview",
     "🧬 Alive Check",
     "🔤 Pattern Anomalies",
     "📛 Name Mismatch",
     "⏳ Timeline Gaps",
     "🧾 Delegates",
+    "🔍 Suggestions",
     "⚙️ Settings",
-], key="active_tab")
+]
+
+# Initialise active_tab on first load only; on reruns the widget keeps its own state.
+if "active_tab" not in st.session_state:
+    st.session_state["active_tab"] = _TAB_LABELS[0]
+
+tab0, tab1, tab2, tab3, tab4, tab8, tab_sug, tab7 = st.tabs(_TAB_LABELS, key="active_tab")
 
 _render_timed("tab0", lambda: tab0_overview.render(
     tab0,
@@ -721,6 +766,17 @@ _render_timed("tab8", lambda: tab8_delegates.render(
 ))
 
 _render_timed("tab7", lambda: tab7_settings.render(tab7))
+
+_render_timed("tab_sug", lambda: tab_suggest.render(
+    tab_sug,
+    df_unresolved=df_unresolved,
+    df_merged=df_merged,
+    suggestion_store=suggestion_store,
+    save_correction=save_correction,
+    df_p=df_p,
+    name_col=name_col,
+    corrected_indices=_corrected_indices,
+))
 
 # end of sheet.py — all tab logic lives in tabs/tab*.py
 

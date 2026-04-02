@@ -1,8 +1,8 @@
 [tab0]
 sort_mode = "Work queue (unreviewed first)"
-sort_primary = "Work queue (unreviewed first)"
-sort_secondary = "Delegate ID"
-search_term = "hoorn"
+sort_primary = "Issue score (worst first)"
+sort_secondary = "Name"
+search_term = ""
 select_col_pos = 0
 [abbrd]
 sheet = "lookup"
