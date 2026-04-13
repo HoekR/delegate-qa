@@ -133,6 +133,8 @@ CORRECTIONS_FILE        = _WS / "corrections.json"
 STAGED_CORRECTIONS_FILE   = _WS / "staged_corrections.json"
 APPROVED_CORRECTIONS_FILE = _WS / "approved_corrections.json"
 NEW_DELEGATES_FILE        = _WS / "new_delegates.json"
+MERGE_DISMISSALS_FILE     = _WS / "merge_dismissals.json"
+PATTERN_SYNONYMS_FILE     = _WS / "pattern_synonyms.json"
 PROVINCE_ORDER_FILE     = _WS / "province_order.json"
 REMAPPINGS_FILE         = _WS / "remappings.json"
 SANDBOXED_FILE          = _WS / "sandboxed.json"
@@ -142,8 +144,8 @@ APP_CONFIG_FILE         = _WS / "app_config.toml"
 
 REPUBLIC_ADD_PREFIX = "republic_add_"
 
-MIN_AGE     = 16
-MAX_AGE     = 90
+MIN_AGE     = 25
+MAX_AGE     = 70
 DEFAULT_GAP = 10
 
 DEFAULT_CORRECTION_FIELDS = ["to_id", "from_id", "name", "updated_at", "source"]
@@ -377,6 +379,53 @@ def load_new_delegates() -> list[dict]:
 
 def save_new_delegates(records: list[dict]) -> None:
     NEW_DELEGATES_FILE.write_text(json.dumps(records, indent=2, default=str))
+
+
+# ---------------------------------------------------------------------------
+# MERGE-ERROR DISMISSALS PERSISTENCE
+# Dismissals are a set of (pattern, delegate_id) string pairs.
+# They are stored as a JSON list of two-element lists for portability.
+# ---------------------------------------------------------------------------
+
+def load_merge_dismissals() -> set[tuple[str, str]]:
+    """Return the set of (pattern, delegate_id) pairs dismissed as false positives."""
+    if MERGE_DISMISSALS_FILE.exists():
+        try:
+            raw = json.loads(MERGE_DISMISSALS_FILE.read_text())
+            return {(str(item[0]), str(item[1])) for item in raw if len(item) == 2}
+        except Exception:
+            return set()
+    return set()
+
+
+def save_merge_dismissals(dismissals: set[tuple[str, str]]) -> None:
+    """Persist the full set of merge-error dismissals to disk."""
+    MERGE_DISMISSALS_FILE.write_text(
+        json.dumps(sorted(list(dismissals)), indent=2, default=str)
+    )
+
+
+# ---------------------------------------------------------------------------
+# PATTERN SYNONYMS PERSISTENCE
+# Each entry: {"delegate_id": str, "anchor": str,
+#              "patterns": [fragment_a, fragment_b],
+#              "freq_a": int, "freq_b": int}
+# The less-frequent pattern is the "ghost" to suppress in n_patterns counts.
+# ---------------------------------------------------------------------------
+
+def load_pattern_synonyms() -> list[dict]:
+    """Return the list of registered fragment-synonym pairs."""
+    if PATTERN_SYNONYMS_FILE.exists():
+        try:
+            return json.loads(PATTERN_SYNONYMS_FILE.read_text())
+        except Exception:
+            return []
+    return []
+
+
+def save_pattern_synonyms(synonyms: list[dict]) -> None:
+    """Persist the full list of pattern synonym pairs to disk."""
+    PATTERN_SYNONYMS_FILE.write_text(json.dumps(synonyms, indent=2, default=str))
 
 
 # ---------------------------------------------------------------------------
@@ -1108,11 +1157,49 @@ def _compute_delegate_summary(
     Called inside build_merged (which is already cached) so the 600k-row
     DataFrame is never hashed a second time by a separate cached function.
 
-    Issue columns added (sortable in the overview grid):
-      n_alive_flags     — rows where age_at_event < MIN_AGE, > MAX_AGE, or j > death_year
-      n_name_mismatches — rows where geslachtsnaam is not found in pattern
-      max_gap_years     — largest consecutive year gap between appearances
+    Issue columns added (sortable in the overview grid), listed in priority order:
+
+      n_pattern_anomalies — occurrences whose pattern's Levenshtein normalised
+                            distance from the delegate's modal pattern exceeds
+                            PATTERN_ANOMALY_THRESHOLD (default 0.5).  Uses
+                            rapidfuzz when available, falls back to character
+                            overlap ratio otherwise.  This is the primary
+                            quality signal: a delegate with many anomalous
+                            patterns is the most likely candidate for a
+                            mis-identification.
+
+      n_alive_flags       — rows where age_at_event < MIN_AGE, > MAX_AGE, or
+                            j > death_year.  Equal weight to pattern anomalies
+                            because the two signals often coincide (a wrong
+                            person inserted into a sequence produces both a
+                            name-pattern outlier AND an impossible age).
+
+      max_gap_years       — largest consecutive year gap between appearances.
+                            Lower weight: a long gap can be legitimate
+                            (illness, diplomatic mission, etc.), so it is a
+                            weaker signal than the two above.
+
+      n_name_mismatches   — occurrences where the delegate's geslachtsnaam is
+                            entirely absent from the pattern string.  Kept for
+                            completeness but excluded from the composite issue
+                            score because it generates many false positives
+                            (abbreviations, pre-marriage name changes, etc.).
+
+    Issue score formula used by the overview grid's "Issue score (worst first)"
+    sort and the suspicious-delegate filter:
+
+        score = n_pattern_anomalies × 2
+              + n_alive_flags        × 2
+              + max_gap_years        × 1
+              + n_name_mismatches    × 0   # visible in table, not in score
+
+    Column order in the returned DataFrame places issue columns at the right
+    in priority order: n_pattern_anomalies, n_alive_flags, max_gap_years,
+    n_name_mismatches.
     """
+    # Normalised-distance threshold for classifying a pattern as anomalous.
+    # Matches the default value of the threshold slider in tab2_patterns.py.
+    PATTERN_ANOMALY_THRESHOLD = 0.5
     if df_merged.empty:
         return pd.DataFrame()
     agg: dict = {"j": ["count", "min", "max"]}
@@ -1126,6 +1213,74 @@ def _compute_delegate_summary(
         "j_max": "last_year",
         "pattern_nunique": "n_patterns",
     })
+
+    # ---- n_patterns ghost-pattern correction ------------------------------
+    # Fragment synonyms: the less-frequent variant of each pair is a "ghost"
+    # pattern that inflates n_patterns.  Subtract the ghost count per delegate
+    # so that each synonym pair contributes only 1 to the distinct-pattern tally.
+    if "n_patterns" in summary.columns:
+        try:
+            _synonyms = load_pattern_synonyms()
+            if _synonyms:
+                # Build ghost_set: {(delegate_id, ghost_pattern)} where ghost is
+                # the pattern with lower frequency in the pair.
+                _ghost_set: set[tuple[str, str]] = set()
+                for _syn in _synonyms:
+                    _did = str(_syn.get("delegate_id", ""))
+                    _pats = _syn.get("patterns", [])
+                    _fa   = int(_syn.get("freq_a", 0))
+                    _fb   = int(_syn.get("freq_b", 0))
+                    if len(_pats) == 2:
+                        _ghost = str(_pats[0]) if _fa <= _fb else str(_pats[1])
+                        _ghost_set.add((_did, _ghost))
+                if _ghost_set:
+                    # Count how many ghosts each delegate has
+                    _ghost_counts: dict[str, int] = {}
+                    for (_did, _pat) in _ghost_set:
+                        _ghost_counts[_did] = _ghost_counts.get(_did, 0) + 1
+                    _summary_did = summary["delegate_id"].astype(str)
+                    _deduct = _summary_did.map(_ghost_counts).fillna(0).astype(int)
+                    summary["n_patterns"] = (summary["n_patterns"] - _deduct).clip(lower=1)
+        except Exception:
+            pass  # never break the pipeline over an optional correction
+
+    # ---- pattern anomalies (primary quality signal) -----------------------
+    # For each delegate, count occurrences whose pattern's normalised
+    # Levenshtein distance from the delegate's modal pattern exceeds
+    # PATTERN_ANOMALY_THRESHOLD.  Uses rapidfuzz when available.
+    if "pattern" in df_merged.columns:
+        try:
+            from rapidfuzz import distance as _rfd
+            def _norm_dist(a: str, b: str) -> float:
+                return _rfd.Levenshtein.normalized_distance(a, b)
+        except ImportError:
+            def _norm_dist(a: str, b: str) -> float:  # type: ignore[misc]
+                return 1 - sum(x == y for x, y in zip(a, b)) / max(len(a), len(b), 1)
+
+        # .astype(object) escapes Categorical dtype so .fillna("") won't fail
+        # when "" is not already in the category set.
+        _pat_series = df_merged["pattern"].astype(object).fillna("").astype(str)
+        _did_series = df_merged["delegate_id"].astype(object).astype(str)
+        # Modal pattern per delegate
+        _modal = (
+            _pat_series.groupby(_did_series, observed=True)
+            .agg(lambda s: s.mode().iloc[0] if not s.empty else "")
+        )
+        # Align modal pattern to every occurrence row
+        _modal_aligned = _did_series.map(_modal).fillna("")
+        _anomaly_flag = pd.Series(
+            [_norm_dist(p, m) > PATTERN_ANOMALY_THRESHOLD
+             for p, m in zip(_pat_series, _modal_aligned)],
+            index=df_merged.index,
+            dtype=bool,
+        )
+        anom_counts = (
+            _anomaly_flag.groupby(_did_series, observed=True)
+            .sum()
+            .astype(int)
+            .rename("n_pattern_anomalies")
+        )
+        summary = summary.merge(anom_counts, on="delegate_id", how="left")
 
     # ---- alive flags -------------------------------------------------------
     if "age_at_event" in df_merged.columns:
@@ -1187,7 +1342,7 @@ def _compute_delegate_summary(
             df_p_copy.drop_duplicates(subset=["delegate_id"]),
             on="delegate_id", how="left",
         )
-    issue_cols = [c for c in ("n_alive_flags", "n_name_mismatches", "max_gap_years")
+    issue_cols = [c for c in ("n_pattern_anomalies", "n_alive_flags", "max_gap_years", "n_name_mismatches")
                   if c in summary.columns]
     front = [c for c in (name_col, "delegate_id") if c in summary.columns]
     mid   = [c for c in summary.columns if c not in front and c not in issue_cols]

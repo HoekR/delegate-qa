@@ -120,6 +120,9 @@ def render(
             lambda p: int(anom_df.loc[anom_df["pattern"] == p, "row_index"].isin(corrected_indices).sum())
         )
         st.caption("Select a pattern row to filter the anomaly grid below to only those occurrences.")
+        if st.button("Deselect all patterns", key="pat_deselect_all"):
+            st.session_state["pat_unique_sel_gen"] = st.session_state.get("pat_unique_sel_gen", 0) + 1
+        _pat_grid_key = f"pat_unique_sel_{st.session_state.get('pat_unique_sel_gen', 0)}"
         gb_unique = GridOptionsBuilder.from_dataframe(unique_pats)
         gb_unique.configure_default_column(resizable=True, sortable=True, filter=True)
         gb_unique.configure_selection(selection_mode="multiple", use_checkbox=True)
@@ -130,7 +133,7 @@ def render(
             width="100%",
             height=min(50 + 35 * len(unique_pats), 300),
             fit_columns_on_grid_load=False,
-            key="pat_unique_sel",
+            key=_pat_grid_key,
         )
         sel_rows_pat = sel_pat.get("selected_rows", [])
         if isinstance(sel_rows_pat, pd.DataFrame):

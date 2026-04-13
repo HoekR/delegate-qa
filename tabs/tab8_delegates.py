@@ -333,8 +333,7 @@ def render(
         st.markdown("---")
         st.subheader("Delegate list")
 
-        st.markdown("**Search / filter**")
-        search = st.text_input("Filter delegates (name / id)", key="delegates_search")
+        search = st.text_input("🔍", key="delegates_search")
         show_missing_abbrd = st.checkbox(
             "Show only delegates not found in abbrd (❌)",
             value=False,
@@ -350,102 +349,7 @@ def render(
             )
             df_display = df_display[mask]
 
-        st.markdown("**Delegate table (edit cells, then click Save)**")
-        gb = GridOptionsBuilder.from_dataframe(df_display)
-        gb.configure_default_column(editable=True, sortable=True, filter=True, resizable=True)
-        gb.configure_column("delegate_id", editable=False)
-        grid_opts = gb.build()
-
-        # Enable single-row selection so users can create a delegate from one specific row.
-        grid_opts["rowSelection"] = "single"
-        grid_opts["suppressRowClickSelection"] = False
-
-        response = AgGrid(
-            df_display,
-            gridOptions=grid_opts,
-            update_mode=GridUpdateMode.VALUE_CHANGED,
-            height=500,
-            fit_columns_on_grid_load=True,
-            key="delegates_grid",
-        )
-
-        updated = response.get("data")
-        selected = response.get("selected_rows")
-        if selected is None:
-            selected = []
-        elif isinstance(selected, pd.DataFrame):
-            selected = selected.to_dict("records")
-
-        # NOTE: selection in this tab is local (Overview controls global selection).
-        # We still expose the selected row's ID so it can be copied or used for local actions.
-        if selected:
-            sel = selected[0]
-            sel_id = str(sel.get("delegate_id", ""))
-            if sel_id:
-                st.text_input("Selected delegate ID (copy)", value=sel_id, key="tab8_selected_id", disabled=True)
-                st.markdown(
-                    f"""
-                    <button onclick="navigator.clipboard.writeText('{sel_id}').then(()=>{{alert('Copied {sel_id}!')}})">Copy ID</button>
-                    """,
-                    unsafe_allow_html=True,
-                )
-        if updated is not None:
-            if isinstance(updated, pd.DataFrame):
-                updated_df = updated
-            elif isinstance(updated, list):
-                updated_df = pd.DataFrame(updated)
-            elif isinstance(updated, dict):
-                updated_df = pd.DataFrame([updated])
-            else:
-                updated_df = None
-
-            if updated_df is not None and not updated_df.empty:
-                new_edits: dict[str, dict] = {}
-                for _, row in updated_df.iterrows():
-                    did = str(row.get("delegate_id", ""))
-                    if not did:
-                        continue
-                    current = edits.get(did, {})
-                    # Save only fields that differ from originals
-                    for col in updated_df.columns:
-                        if col == "delegate_id":
-                            continue
-                        val = row.get(col)
-                        if pd.isna(val):
-                            val = None
-                        if current.get(col) != val:
-                            current[col] = val
-                    if current:
-                        new_edits[did] = current
-                if new_edits != edits:
-                    save_delegate_edits(new_edits)
-                    st.success("Saved delegate edits.")
-                    rerun()
-
-        if selected:
-            st.caption("Row selected (use the button below to create a delegate from this row).")
-        else:
-            st.caption("Select a row in the table to enable the ‘Create from selected row’ action.")
-
-        if selected and st.button("Create delegate from selected row"):
-            sel = selected[0]
-            did = str(sel.get("delegate_id", ""))
-            if not did:
-                st.warning("Selected row has no delegate_id.")
-            else:
-                existing_person_ids = {
-                    str(x) for x in (df_p["delegate_id"].astype(str) if "delegate_id" in df_p.columns else [])
-                }
-                existing_new_ids = {str(r.get("delegate_id")) for r in st.session_state["new_delegates"]}
-                if did in existing_person_ids or did in existing_new_ids:
-                    st.info("This delegate already exists in persons or has already been added.")
-                else:
-                    rec = {k: v for k, v in sel.items() if pd.notna(v) and k != "abbrd_status"}
-                    rec["delegate_id"] = did
-                    st.session_state["new_delegates"].append(rec)
-                    save_new_delegates(st.session_state["new_delegates"])
-                    st.success(f"Created delegate `{did}` from selected row and added to Overview.")
-                    rerun()
+        st.dataframe(df_display, width="stretch", height=400)
 
         def _refresh_ids(ids: list[str], show_report: bool = True) -> None:
             """Refresh only the given IDs, optionally reporting what was matched/filled."""

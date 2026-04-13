@@ -26,26 +26,30 @@ def render(tab) -> None:
         st.markdown("Settings here are saved immediately and applied on next tab switch.")
 
         sort_options = [
+            "Issue score → unreviewed → name",
             "Work queue (unreviewed first)",
             "Delegate ID",
             "Name",
             "Reviewed (✅ first)",
             "Issue score (worst first)",
         ]
+        _sort_default = "Issue score → unreviewed → name"
 
         sort_primary = st.selectbox(
             "Default primary sort",
             sort_options,
-            index=sort_options.index(tab0_cfg.get("sort_primary", "Work queue (unreviewed first)")),
+            index=sort_options.index(tab0_cfg.get("sort_primary", _sort_default)
+                                     if tab0_cfg.get("sort_primary", _sort_default) in sort_options
+                                     else _sort_default),
         )
         tab0_cfg["sort_primary"] = sort_primary
 
+        _sec_opts = [o for o in sort_options if o != sort_primary]
+        _sec_default = tab0_cfg.get("sort_secondary", "Delegate ID")
         sort_secondary = st.selectbox(
             "Default secondary sort",
-            [o for o in sort_options if o != sort_primary],
-            index=[o for o in sort_options if o != sort_primary].index(
-                tab0_cfg.get("sort_secondary", "Delegate ID")
-            ),
+            _sec_opts,
+            index=_sec_opts.index(_sec_default) if _sec_default in _sec_opts else 0,
         )
         tab0_cfg["sort_secondary"] = sort_secondary
 
@@ -63,6 +67,27 @@ def render(tab) -> None:
             key="tab0_default_search",
             on_change=lambda: _on_search_changed(tab0_cfg),
         )
+
+        st.markdown("---")
+        st.subheader("Age plausibility thresholds")
+        st.caption("Used in the Alive Check tab to flag delegates whose computed age falls outside this range.")
+        alive_cfg = cfg.setdefault("alive", {})
+        min_age = st.number_input(
+            "Minimum age",
+            min_value=0,
+            max_value=100,
+            value=int(alive_cfg.get("min_age", 25)),
+            key="alive_min_age",
+        )
+        alive_cfg["min_age"] = int(min_age)
+        max_age = st.number_input(
+            "Maximum age",
+            min_value=0,
+            max_value=150,
+            value=int(alive_cfg.get("max_age", 70)),
+            key="alive_max_age",
+        )
+        alive_cfg["max_age"] = int(max_age)
 
         st.markdown("---")
         st.subheader("Abbrd file location")
@@ -222,6 +247,7 @@ def _on_search_changed(tab0_cfg: dict) -> None:
 
 def _reset_defaults() -> None:
     cfg = st.session_state.get("config", {})
+    cfg["alive"] = {"min_age": 25, "max_age": 70}
     cfg["tab0"] = {
         "sort_primary": "Work queue (unreviewed first)",
         "sort_secondary": "Delegate ID",

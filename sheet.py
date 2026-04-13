@@ -69,6 +69,7 @@ from tabs import (
     tab4_timeline,
     tab7_settings,
     tab8_delegates,
+    tab9_merges,
     tab_suggest,
 )
 # ---------------------------------------------------------------------------
@@ -123,6 +124,10 @@ if "config" not in st.session_state:
                 "sort_secondary": "Delegate ID",
                 "search_term": "",
                 "select_col_pos": 0,
+            },
+            "alive": {
+                "min_age": 25,
+                "max_age": 70,
             },
             "abbrd": {
                 "sheet": "lookup",
@@ -685,6 +690,7 @@ _TAB_LABELS = [
     "⏳ Timeline Gaps",
     "🧾 Delegates",
     "🔍 Suggestions",
+    "🔗 Merge Errors",
     "⚙️ Settings",
 ]
 
@@ -692,7 +698,7 @@ _TAB_LABELS = [
 if "active_tab" not in st.session_state:
     st.session_state["active_tab"] = _TAB_LABELS[0]
 
-tab0, tab1, tab2, tab3, tab4, tab8, tab_sug, tab7 = st.tabs(_TAB_LABELS, key="active_tab")
+tab0, tab1, tab2, tab3, tab4, tab8, tab_sug, tab9, tab7 = st.tabs(_TAB_LABELS, key="active_tab")
 
 _render_timed("tab0", lambda: tab0_overview.render(
     tab0,
@@ -715,14 +721,17 @@ _render_timed("tab0", lambda: tab0_overview.render(
     corrected_delegate_ids=_corrected_delegate_ids,
 ))
 
+_alive_cfg = st.session_state.get("config", {}).get("alive", {})
+_MIN_AGE = int(_alive_cfg.get("min_age", MIN_AGE))
+_MAX_AGE = int(_alive_cfg.get("max_age", MAX_AGE))
 _render_timed("tab1", lambda: tab1_alive.render(
     tab1,
     df_delegate=df_delegate,
     has_bio=_has_bio,
     name_col=name_col,
     ABBRD_FILE=ABBRD_FILE,
-    MIN_AGE=MIN_AGE,
-    MAX_AGE=MAX_AGE,
+    MIN_AGE=_MIN_AGE,
+    MAX_AGE=_MAX_AGE,
     save_correction=save_correction,
     corrected_indices=_corrected_indices,
 ))
@@ -766,6 +775,13 @@ _render_timed("tab8", lambda: tab8_delegates.render(
 ))
 
 _render_timed("tab7", lambda: tab7_settings.render(tab7))
+
+_render_timed("tab9", lambda: tab9_merges.render(
+    tab9,
+    df_merged=df_merged,
+    name_col=name_col,
+    save_correction=save_correction,
+))
 
 _render_timed("tab_sug", lambda: tab_suggest.render(
     tab_sug,

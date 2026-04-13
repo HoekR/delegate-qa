@@ -97,7 +97,7 @@ def render(
         # Persist UI settings (sort/search/select position) via app config.
         config = st.session_state.get("config", {})
         tab0_cfg = config.setdefault("tab0", {})
-        tab0_cfg.setdefault("sort_primary", "Work queue (unreviewed first)")
+        tab0_cfg.setdefault("sort_primary", "Issue score → unreviewed → name")
         tab0_cfg.setdefault("sort_secondary", "Delegate ID")
         tab0_cfg.setdefault("search_term", "")
         tab0_cfg.setdefault("select_col_pos", 0)
@@ -163,6 +163,7 @@ def render(
 
         # Sorting mode for the grid (help understand why selection appears to 'move')
         sort_options = [
+            "Issue score → unreviewed → name",
             "Work queue (unreviewed first)",
             "Delegate ID",
             "Name",
@@ -179,49 +180,52 @@ def render(
         )
 
         def _issue_score(df: pd.DataFrame) -> pd.Series:
-            cols = ["n_alive_flags", "n_name_mismatches", "max_gap_years"]
-            score = pd.Series(0, index=df.index, dtype=int)
-            for c in cols:
-                if c in df.columns:
-                    score = score.add(df[c].fillna(0).astype(int), fill_value=0)
+            # Weighted composite — see weights comment in utils._compute_delegate_summary
+            score = pd.Series(0.0, index=df.index)
+            if "n_pattern_anomalies" in df.columns:
+                score = score.add(df["n_pattern_anomalies"].fillna(0) * 2, fill_value=0)
+            if "n_alive_flags" in df.columns:
+                score = score.add(df["n_alive_flags"].fillna(0) * 2, fill_value=0)
+            if "max_gap_years" in df.columns:
+                score = score.add(df["max_gap_years"].fillna(0).clip(upper=50) / 10, fill_value=0)
             return score
 
-        if sort_primary == "Work queue (unreviewed first)":
-            _status_order = {"—": 0, "⚠️": 1, "✅": 2}
+        # Stamp both helper columns onto summary_disp once, so every sort branch
+        # can rely on them without recomputing.
+        _status_order = {"—": 0, "⚠️": 1, "✅": 2}
+        summary_disp = summary_disp.assign(
+            _issue_score=_issue_score(summary_disp),
+            _status_rank=summary_disp["status"].map(_status_order).fillna(0),
+        )
+
+        sort_name = [name_col] if name_col in summary_disp.columns else []
+
+        if sort_primary == "Issue score → unreviewed → name":
             summary_disp = summary_disp.sort_values(
-                "status",
-                key=lambda s: s.map(_status_order),
-                kind="stable",
+                ["_issue_score", "_status_rank"] + sort_name,
+                ascending=[False, True] + [True] * len(sort_name),
             )
+        elif sort_primary == "Work queue (unreviewed first)":
+            summary_disp = summary_disp.sort_values("_status_rank")
         elif sort_primary == "Reviewed (✅ first)":
-            _status_order = {"✅": 0, "⚠️": 1, "—": 2}
-            summary_disp = summary_disp.sort_values(
-                "status",
-                key=lambda s: s.map(_status_order),
-                kind="stable",
-            )
+            summary_disp = summary_disp.sort_values("_status_rank", ascending=False)
         elif sort_primary == "Issue score (worst first)":
-            summary_disp = summary_disp.assign(_issue_score=_issue_score(summary_disp))
             summary_disp = summary_disp.sort_values("_issue_score", ascending=False)
         elif sort_primary == "Delegate ID" and "delegate_id" in summary_disp.columns:
             summary_disp = summary_disp.sort_values("delegate_id")
         elif sort_primary == "Name" and name_col in summary_disp.columns:
             summary_disp = summary_disp.sort_values(name_col)
 
-        # Secondary sort (stable sort to preserve primary ordering)
-        if sort_secondary == "Delegate ID" and "delegate_id" in summary_disp.columns:
-            summary_disp = summary_disp.sort_values("delegate_id", kind="stable")
-        elif sort_secondary == "Name" and name_col in summary_disp.columns:
-            summary_disp = summary_disp.sort_values(name_col, kind="stable")
-        elif sort_secondary == "Reviewed (✅ first)":
-            _status_order = {"✅": 0, "⚠️": 1, "—": 2}
-            summary_disp = summary_disp.sort_values(
-                "status", key=lambda s: s.map(_status_order), kind="stable"
-            )
-        elif sort_secondary == "Issue score (worst first)":
-            if "_issue_score" not in summary_disp.columns:
-                summary_disp = summary_disp.assign(_issue_score=_issue_score(summary_disp))
-            summary_disp = summary_disp.sort_values("_issue_score", ascending=False)
+        # Secondary sort (stable, skipped when primary already covers multiple keys)
+        if sort_primary != "Issue score → unreviewed → name":
+            if sort_secondary == "Delegate ID" and "delegate_id" in summary_disp.columns:
+                summary_disp = summary_disp.sort_values("delegate_id", kind="stable")
+            elif sort_secondary == "Name" and name_col in summary_disp.columns:
+                summary_disp = summary_disp.sort_values(name_col, kind="stable")
+            elif sort_secondary == "Reviewed (✅ first)":
+                summary_disp = summary_disp.sort_values("_status_rank", kind="stable")
+            elif sort_secondary == "Issue score (worst first)":
+                summary_disp = summary_disp.sort_values("_issue_score", ascending=False, kind="stable")
 
         summary_disp = summary_disp.reset_index(drop=True)
 
@@ -266,9 +270,6 @@ def render(
             suspicious_patterns = search_col.checkbox(
                 "Include diverging patterns", value=True, key="tab0_suspicious_patterns"
             )
-            pattern_thresh = search_col.slider(
-                "Min unique patterns", 1, 10, 4, key="tab0_suspicious_pattern_thresh"
-            )
 
         if show_suspicious:
             mask_suspicious = pd.Series(False, index=summary_disp.index)
@@ -276,8 +277,13 @@ def render(
                 mask_suspicious |= summary_disp["n_alive_flags"].fillna(0) > 0
             if suspicious_gaps and "max_gap_years" in summary_disp.columns:
                 mask_suspicious |= summary_disp["max_gap_years"].fillna(0) >= gap_years_threshold
-            if suspicious_patterns and "n_patterns" in summary_disp.columns:
-                mask_suspicious |= summary_disp["n_patterns"].fillna(0) >= pattern_thresh
+            if suspicious_patterns:
+                # Prefer the pre-computed anomaly count; fall back to unique-pattern
+                # proxy if the column isn't present (older cached summary).
+                if "n_pattern_anomalies" in summary_disp.columns:
+                    mask_suspicious |= summary_disp["n_pattern_anomalies"].fillna(0) > 0
+                elif "n_patterns" in summary_disp.columns:
+                    mask_suspicious |= summary_disp["n_patterns"].fillna(0) >= 4
             mask_reviewed = summary_disp["status"] == "✅"
             summary_disp = summary_disp[mask_suspicious | mask_reviewed]
 
@@ -291,9 +297,22 @@ def render(
             )
             summary_disp = summary_disp[_mask]
         _total = len(summary_disp)
-        summary_disp = summary_disp.head(_PAGE_SIZE).reset_index(drop=True)
-        if _total > _PAGE_SIZE:
-            page_col.caption(f"Showing {_PAGE_SIZE} of {_total} — type a name to narrow")
+        _n_pages = max(1, (_total + _PAGE_SIZE - 1) // _PAGE_SIZE)
+        # Clamp stored page to valid range (e.g. after a filter shrinks results)
+        if st.session_state.get("tab0_page", 1) > _n_pages:
+            st.session_state["tab0_page"] = _n_pages
+        if _n_pages > 1:
+            _page = int(page_col.number_input(
+                "Page", min_value=1, max_value=_n_pages,
+                step=1, key="tab0_page", label_visibility="collapsed",
+            ))
+        else:
+            st.session_state["tab0_page"] = 1
+            _page = 1
+        _start = (_page - 1) * _PAGE_SIZE
+        summary_disp = summary_disp.iloc[_start : _start + _PAGE_SIZE].reset_index(drop=True)
+        if _n_pages > 1:
+            page_col.caption(f"p.{_page}/{_n_pages} ({_total})")
         else:
             page_col.caption(f"{_total} delegate(s)")
 
@@ -363,7 +382,6 @@ def render(
             pre_selected_rows=pre_sel_idx,
         )
         gb.configure_grid_options(suppressRowClickSelection=True)
-        gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=25)
         grid_opts = gb.build()
 
         # Highlight the selected row with a red border for clarity.
