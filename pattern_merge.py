@@ -126,18 +126,29 @@ def _split_points(s: str) -> list[int]:
 
 class AnchorTable(NamedTuple):
     """Pre-computed per-delegate anchors and day-ordered position table."""
-    anchors: dict[str, str]          # delegate_id → normalised anchor pattern
-    modals:  dict[str, str]          # delegate_id → raw modal pattern
-    day_pos: pd.DataFrame            # df with _day, _pos, delegate_id, pattern, row_index
+    anchors:      dict[str, str]        # delegate_id → normalised anchor pattern
+    modals:       dict[str, str]        # delegate_id → raw modal pattern
+    day_pos:      pd.DataFrame          # df with _day, _pos, _rank, delegate_id, pattern, row_index
+    all_patterns: dict[str, list[str]]  # delegate_id → [all distinct normalised patterns, sorted]
 
 
-def build_anchor_table(df_merged: pd.DataFrame) -> AnchorTable:
+def build_anchor_table(
+    df_merged: pd.DataFrame,
+    synonyms: list[dict] | None = None,
+) -> AnchorTable:
     """Build the anchor lookup and the day-position table.
 
     Parameters
     ----------
     df_merged : pd.DataFrame
         The merged occurrences+persons DataFrame from build_merged().
+    synonyms : list[dict] | None
+        Optional list of pattern-synonym records (from pattern_synonyms.json).
+        Each entry: {"delegate_id": str, "patterns": [canonical, ghost], ...}
+        where the ghost is the pattern with lower frequency.  When supplied,
+        ghost patterns are remapped to their canonical before the modal is
+        computed, so delegates that have both fragment *and* concat errors
+        get a clean anchor for the concat detector.
 
     Returns
     -------
@@ -151,6 +162,20 @@ def build_anchor_table(df_merged: pd.DataFrame) -> AnchorTable:
     needed = {"delegate_id", "pattern"}
     if not needed.issubset(df_merged.columns):
         raise ValueError(f"df_merged must have columns {needed}")
+
+    # ── Build ghost→canonical remap from synonyms ──────────────────────────
+    # ghost_remap: {(delegate_id, ghost_pattern): canonical_pattern}
+    ghost_remap: dict[tuple[str, str], str] = {}
+    if synonyms:
+        for syn in synonyms:
+            did   = str(syn.get("delegate_id", ""))
+            pats  = syn.get("patterns", [])
+            freq_a = int(syn.get("freq_a", 0))
+            freq_b = int(syn.get("freq_b", 0))
+            if len(pats) == 2:
+                # canonical = higher-frequency variant; ghost = lower
+                canonical, ghost = (pats[0], pats[1]) if freq_a >= freq_b else (pats[1], pats[0])
+                ghost_remap[(did, ghost)] = canonical
 
     # ── Exclude session headers and president rows from anchor computation ─
     # Session headers (Batavian date lines, PRAESIDE Den Burger …) would corrupt
@@ -170,8 +195,18 @@ def build_anchor_table(df_merged: pd.DataFrame) -> AnchorTable:
     pat_clean  = df_clean["pattern"].astype(str)
     did_clean  = df_clean["delegate_id"].astype(str)
 
+    # If synonyms were supplied, remap ghost patterns to their canonical
+    # before computing the mode so concat anchors aren't polluted by fragments.
+    if ghost_remap:
+        pat_for_modal = pat_clean.copy()
+        for (syn_did, ghost), canonical in ghost_remap.items():
+            mask = (did_clean == syn_did) & (pat_clean == ghost)
+            pat_for_modal = pat_for_modal.where(~mask, other=canonical)
+    else:
+        pat_for_modal = pat_clean
+
     modal_raw: dict[str, str] = (
-        df_clean.assign(_did=did_clean, _pat=pat_clean)
+        df_clean.assign(_did=did_clean, _pat=pat_for_modal)
         .groupby("_did")["_pat"]
         .agg(lambda s: s.mode().iloc[0] if not s.empty else "")
         .to_dict()
@@ -185,6 +220,17 @@ def build_anchor_table(df_merged: pd.DataFrame) -> AnchorTable:
         for did, modal in modal_raw.items()
         if modal
     }
+
+    # Build all-patterns lookup: {did: [sorted list of distinct normalised patterns]}
+    # df_merged must already have corrections applied (apply_corrections is called by
+    # sheet.py before passing df_merged here), so reassigned patterns appear under
+    # the corrected delegate — not the original one.
+    all_patterns_raw: dict[str, list[str]] = (
+        df_clean.assign(_did2=did_clean)
+        .groupby("_did2")["pattern"]
+        .apply(lambda s: sorted({_norm(p) for p in s if p}))
+        .to_dict()
+    )
 
     # ── Day-position table ─────────────────────────────────────────────────
     # Determine a "day" key from the data.  Prefer an explicit date column;
@@ -226,7 +272,7 @@ def build_anchor_table(df_merged: pd.DataFrame) -> AnchorTable:
     day_pos.columns = ["_day", "_pos", "_rank", "delegate_id", "pattern", "row_index"]
     day_pos = day_pos.reset_index(drop=True)
 
-    return AnchorTable(anchors=anchors, modals=modal_raw, day_pos=day_pos)
+    return AnchorTable(anchors=anchors, modals=modal_raw, day_pos=day_pos, all_patterns=all_patterns_raw)
 
 
 # ---------------------------------------------------------------------------
@@ -300,8 +346,9 @@ def detect_concat_errors(
     if at is None:
         at = build_anchor_table(df_merged)
 
-    anchors   = at.anchors
-    day_pos   = at.day_pos
+    anchors      = at.anchors
+    all_patterns = at.all_patterns
+    day_pos      = at.day_pos
 
     # Restrict day_pos to the filtered rows
     day_pos_f = day_pos[day_pos["row_index"].isin(df.index)]
@@ -379,8 +426,10 @@ def detect_concat_errors(
         day       = row.get("_day", "?")
         rank      = row.get("_rank", -1)
 
-        # Collect neighbor delegate anchors
-        neighbor_anchors: dict[str, str] = {}
+        # Collect all patterns per neighbor delegate.
+        # Uses the full variant list (corrected) so exact-match and Levenshtein
+        # scoring work against every known HTR rendering, not just the modal.
+        neighbor_patterns: dict[str, list[str]] = {}
         if pd.notna(rank):
             rank = int(rank)
             for delta in range(-neighbor_window, neighbor_window + 1):
@@ -388,11 +437,14 @@ def detect_concat_errors(
                     continue
                 nbr_id = day_lookup.get((day, rank + delta))
                 if nbr_id and nbr_id != did:
-                    nbr_anchor = anchors.get(nbr_id, "")
-                    if nbr_anchor:
-                        neighbor_anchors[nbr_id] = nbr_anchor
+                    nbr_pats = all_patterns.get(nbr_id)
+                    if not nbr_pats:
+                        nbr_anchor = anchors.get(nbr_id, "")
+                        nbr_pats = [nbr_anchor] if nbr_anchor else []
+                    if nbr_pats:
+                        neighbor_patterns[nbr_id] = nbr_pats
 
-        if not neighbor_anchors:
+        if not neighbor_patterns:
             continue
 
         # Try all split points
@@ -408,12 +460,15 @@ def detect_concat_errors(
             left_vs_own  = _lev_dist(left,  anchor) if anchor else 1.0
             right_vs_own = _lev_dist(right, anchor) if anchor else 1.0
 
-            # Find best-matching neighbor for each half
+            # Find best-matching neighbor for each half.
+            # Exact match against any known variant scores 0.0; otherwise
+            # take the minimum Levenshtein distance across all variants.
             best_left_id, best_left_score   = "", 1.0
             best_right_id, best_right_score = "", 1.0
-            for nbr_id, nbr_anchor in neighbor_anchors.items():
-                ld = _lev_dist(left, nbr_anchor)
-                rd = _lev_dist(right, nbr_anchor)
+            for nbr_id, pat_list in neighbor_patterns.items():
+                pat_set = set(pat_list)
+                ld = 0.0 if left  in pat_set else min(_lev_dist(left,  p) for p in pat_list)
+                rd = 0.0 if right in pat_set else min(_lev_dist(right, p) for p in pat_list)
                 if ld < best_left_score:
                     best_left_score  = ld
                     best_left_id     = nbr_id

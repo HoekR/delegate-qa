@@ -1,0 +1,342 @@
+[
+  {
+    "delegate_id": "17128",
+    "anchor": "van iddekinge",
+    "patterns": [
+      "Idekinge",
+      "van Id"
+    ],
+    "freq_a": 65,
+    "freq_b": 1
+  },
+  {
+    "delegate_id": "17128",
+    "anchor": "van iddekinge",
+    "patterns": [
+      "Hdekinge",
+      "van Id"
+    ],
+    "freq_a": 1,
+    "freq_b": 1
+  },
+  {
+    "delegate_id": "17308",
+    "anchor": "van lynden tot hemmen",
+    "patterns": [
+      "Hemmen",
+      "van Lynden Bout"
+    ],
+    "freq_a": 1,
+    "freq_b": 1
+  },
+  {
+    "delegate_id": "13383",
+    "anchor": "boreel de mauregnault",
+    "patterns": [
+      "Booreel",
+      "de Mauregnaust"
+    ],
+    "freq_a": 1,
+    "freq_b": 2
+  },
+  {
+    "delegate_id": "13383",
+    "anchor": "boreel de mauregnault",
+    "patterns": [
+      "Bureel",
+      "de Mauregnaust"
+    ],
+    "freq_a": 2,
+    "freq_b": 2
+  },
+  {
+    "delegate_id": "13383",
+    "anchor": "boreel de mauregnault",
+    "patterns": [
+      "Boreet",
+      "de Mauregnaust"
+    ],
+    "freq_a": 1,
+    "freq_b": 2
+  },
+  {
+    "delegate_id": "13383",
+    "anchor": "boreel de mauregnault",
+    "patterns": [
+      "Bareel",
+      "de Mauregnaust"
+    ],
+    "freq_a": 1,
+    "freq_b": 2
+  },
+  {
+    "delegate_id": "13383",
+    "anchor": "boreel de mauregnault",
+    "patterns": [
+      "Bireel",
+      "de Mauregnaust"
+    ],
+    "freq_a": 1,
+    "freq_b": 2
+  },
+  {
+    "delegate_id": "13383",
+    "anchor": "boreel de mauregnault",
+    "patterns": [
+      "Boeeel",
+      "de Mauregnaust"
+    ],
+    "freq_a": 1,
+    "freq_b": 2
+  },
+  {
+    "delegate_id": "13383",
+    "anchor": "boreel de mauregnault",
+    "patterns": [
+      "Boteel",
+      "de Mauregnaust"
+    ],
+    "freq_a": 2,
+    "freq_b": 2
+  },
+  {
+    "delegate_id": "17128",
+    "anchor": "van iddekinge",
+    "patterns": [
+      "Yddekinge",
+      "van Id"
+    ],
+    "freq_a": 1,
+    "freq_b": 1
+  },
+  {
+    "delegate_id": "17128",
+    "anchor": "van iddekinge",
+    "patterns": [
+      "Tddekinge",
+      "van Id"
+    ],
+    "freq_a": 1,
+    "freq_b": 1
+  },
+  {
+    "delegate_id": "17128",
+    "anchor": "van iddekinge",
+    "patterns": [
+      "Idekinge",
+      "van Idd"
+    ],
+    "freq_a": 65,
+    "freq_b": 2
+  },
+  {
+    "delegate_id": "17128",
+    "anchor": "van iddekinge",
+    "patterns": [
+      "Iddekinge",
+      "van Id"
+    ],
+    "freq_a": 647,
+    "freq_b": 1
+  },
+  {
+    "delegate_id": "17128",
+    "anchor": "van iddekinge",
+    "patterns": [
+      "Idaekinge",
+      "van Id"
+    ],
+    "freq_a": 1,
+    "freq_b": 1
+  },
+  {
+    "delegate_id": "17128",
+    "anchor": "van iddekinge",
+    "patterns": [
+      "Iadekinge",
+      "van Id"
+    ],
+    "freq_a": 1,
+    "freq_b": 1
+  },
+  {
+    "delegate_id": "17128",
+    "anchor": "van iddekinge",
+    "patterns": [
+      "Hdekinge",
+      "van Idd"
+    ],
+    "freq_a": 1,
+    "freq_b": 2
+  },
+  {
+    "delegate_id": "17128",
+    "anchor": "van iddekinge",
+    "patterns": [
+      "Idelinge",
+      "van Id"
+    ],
+    "freq_a": 1,
+    "freq_b": 1
+  },
+  {
+    "delegate_id": "20042",
+    "anchor": "van tuyll van zuylen",
+    "patterns": [
+      "Van Tuyll",
+      "van Tuyll"
+    ],
+    "freq_a": 1,
+    "freq_b": 1
+  },
+  {
+    "delegate_id": "20162",
+    "anchor": "kniphuysen tot ulrum",
+    "patterns": [
+      "Kniphuysent",
+      "Ulrum"
+    ],
+    "freq_a": 1,
+    "freq_b": 5
+  },
+  {
+    "delegate_id": "13383",
+    "anchor": "boreel de mauregnault",
+    "patterns": [
+      "Bareel",
+      "de Mauregnault"
+    ],
+    "freq_a": 1,
+    "freq_b": 49
+  },
+  {
+    "delegate_id": "13383",
+    "anchor": "boreel de mauregnault",
+    "patterns": [
+      "Bireel",
+      "de Mauregnault"
+    ],
+    "freq_a": 1,
+    "freq_b": 49
+  },
+  {
+    "delegate_id": "13383",
+    "anchor": "boreel de mauregnault",
+    "patterns": [
+      "Boeeel",
+      "de Mauregnault"
+    ],
+    "freq_a": 1,
+    "freq_b": 49
+  },
+  {
+    "delegate_id": "20042",
+    "anchor": "van tuyll van zuylen",
+    "patterns": [
+      "van Tuyll",
+      "van Zuylen"
+    ],
+    "freq_a": 1,
+    "freq_b": 2
+  },
+  {
+    "delegate_id": "13383",
+    "anchor": "boreel de mauregnault",
+    "patterns": [
+      "Boreel",
+      "de Mauregnault"
+    ],
+    "freq_a": 670,
+    "freq_b": 49
+  },
+  {
+    "delegate_id": "20042",
+    "anchor": "van tuyll van zuylen",
+    "patterns": [
+      "Van Tuyll",
+      "van Zuylen"
+    ],
+    "freq_a": 1,
+    "freq_b": 2
+  },
+  {
+    "delegate_id": "17249",
+    "anchor": "van hardenbroek van lockhorst",
+    "patterns": [
+      "van Hardenbrok",
+      "van Lockhorst"
+    ],
+    "freq_a": 1,
+    "freq_b": 3
+  },
+  {
+    "delegate_id": "17249",
+    "anchor": "van hardenbroek van lockhorst",
+    "patterns": [
+      "Van Hardenbrok",
+      "van Lockhorst"
+    ],
+    "freq_a": 1,
+    "freq_b": 3
+  },
+  {
+    "delegate_id": "13383",
+    "anchor": "boreel de mauregnault",
+    "patterns": [
+      "Booreel",
+      "de Mauregnault"
+    ],
+    "freq_a": 1,
+    "freq_b": 49
+  },
+  {
+    "delegate_id": "13383",
+    "anchor": "boreel de mauregnault",
+    "patterns": [
+      "Boreel",
+      "de Mauregnaust"
+    ],
+    "freq_a": 670,
+    "freq_b": 2
+  },
+  {
+    "delegate_id": "13383",
+    "anchor": "boreel de mauregnault",
+    "patterns": [
+      "Boreet",
+      "de Mauregnault"
+    ],
+    "freq_a": 1,
+    "freq_b": 49
+  },
+  {
+    "delegate_id": "13383",
+    "anchor": "boreel de mauregnault",
+    "patterns": [
+      "Boteel",
+      "de Mauregnault"
+    ],
+    "freq_a": 2,
+    "freq_b": 49
+  },
+  {
+    "delegate_id": "13383",
+    "anchor": "boreel de mauregnault",
+    "patterns": [
+      "Bureel",
+      "de Mauregnault"
+    ],
+    "freq_a": 2,
+    "freq_b": 49
+  },
+  {
+    "delegate_id": "17308",
+    "anchor": "van lynden tot hemmen",
+    "patterns": [
+      "Hemmen",
+      "Van Lynden Bout"
+    ],
+    "freq_a": 1,
+    "freq_b": 1
+  }
+]

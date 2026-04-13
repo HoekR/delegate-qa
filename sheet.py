@@ -779,6 +779,7 @@ _render_timed("tab7", lambda: tab7_settings.render(tab7))
 _render_timed("tab9", lambda: tab9_merges.render(
     tab9,
     df_merged=df_merged,
+    df_p=df_p,
     name_col=name_col,
     save_correction=save_correction,
 ))

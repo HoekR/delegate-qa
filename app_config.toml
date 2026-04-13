@@ -36,3 +36,37 @@ source_key = "source"
 fields = ["to_id", "from_id", "name", "updated_at", "source"]
 source_default = "manual"
 source_legacy = "legacy"
+[tab0]
+sort_mode = "Work queue (unreviewed first)"
+sort_primary = "Work queue (unreviewed first)"
+sort_secondary = "Delegate ID"
+search_term = ""
+select_col_pos = 0
+[abbrd]
+sheet = "lookup"
+id_col = "id_persoon"
+name_col = "fullname"
+max_preview_fields = 6
+auto_refresh = false
+disable_cache = false
+[field_map]
+fullname = "fullname"
+id_persoon = "cons_id_str"
+voornaam = "voornaam"
+tussenvoegsel = "tussenvoegsel"
+geslachtsnaam = "geslachtsnaam"
+geboortejaar = "geboortejaar"
+overlijden = "overlijdensjaar"
+beginjaar = "minjaar"
+eindjaar = "maxjaar"
+hlife = "hlife"
+provincie = "provincie"
+[corrections]
+to_id_key = "to_id"
+from_id_key = "from_id"
+name_key = "name"
+updated_at_key = "updated_at"
+source_key = "source"
+fields = ["to_id", "from_id", "name", "updated_at", "source"]
+source_default = "manual"
+source_legacy = "legacy"
