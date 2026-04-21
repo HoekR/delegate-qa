@@ -338,5 +338,625 @@
     ],
     "freq_a": 1,
     "freq_b": 1
+  },
+  {
+    "delegate_id": "18379",
+    "anchor": "d' ablaing van giessenburgh",
+    "patterns": [
+      "d' Ablaing",
+      "dAbaing Giessenburgh"
+    ],
+    "freq_a": 26,
+    "freq_b": 3
+  },
+  {
+    "delegate_id": "18379",
+    "anchor": "d' ablaing van giessenburgh",
+    "patterns": [
+      "d AbaingGiessenburgh",
+      "d' Ablaing"
+    ],
+    "freq_a": 1,
+    "freq_b": 26
+  },
+  {
+    "delegate_id": "18379",
+    "anchor": "d' ablaing van giessenburgh",
+    "patterns": [
+      "d' Ablaing",
+      "lAbaing Giessenburgh"
+    ],
+    "freq_a": 26,
+    "freq_b": 1
+  },
+  {
+    "delegate_id": "16231",
+    "anchor": "sloet tot de haer",
+    "patterns": [
+      "Slaet",
+      "Sloet tot de"
+    ],
+    "freq_a": 1,
+    "freq_b": 1
+  },
+  {
+    "delegate_id": "17128",
+    "anchor": "van iddekinge",
+    "patterns": [
+      "Idaekinge",
+      "van Idd"
+    ],
+    "freq_a": 1,
+    "freq_b": 2
+  },
+  {
+    "delegate_id": "17128",
+    "anchor": "van iddekinge",
+    "patterns": [
+      "Tddekinge",
+      "van Idd"
+    ],
+    "freq_a": 1,
+    "freq_b": 2
+  },
+  {
+    "delegate_id": "17128",
+    "anchor": "van iddekinge",
+    "patterns": [
+      "Hdekinge",
+      "van Idde"
+    ],
+    "freq_a": 1,
+    "freq_b": 2
+  },
+  {
+    "delegate_id": "17128",
+    "anchor": "van iddekinge",
+    "patterns": [
+      "Yddekinge",
+      "van Idd"
+    ],
+    "freq_a": 1,
+    "freq_b": 2
+  },
+  {
+    "delegate_id": "17128",
+    "anchor": "van iddekinge",
+    "patterns": [
+      "Idekinge",
+      "van Idde"
+    ],
+    "freq_a": 65,
+    "freq_b": 2
+  },
+  {
+    "delegate_id": "17128",
+    "anchor": "van iddekinge",
+    "patterns": [
+      "Iddekinge",
+      "van Idd"
+    ],
+    "freq_a": 647,
+    "freq_b": 2
+  },
+  {
+    "delegate_id": "17128",
+    "anchor": "van iddekinge",
+    "patterns": [
+      "Iadekinge",
+      "van Idd"
+    ],
+    "freq_a": 1,
+    "freq_b": 2
+  },
+  {
+    "delegate_id": "19777",
+    "anchor": "van lith de jeude",
+    "patterns": [
+      "Lithde Jeude",
+      "van Lith"
+    ],
+    "freq_a": 13,
+    "freq_b": 17
+  },
+  {
+    "delegate_id": "17308",
+    "anchor": "van lynden tot hemmen",
+    "patterns": [
+      "Hemmen",
+      "van Lynden"
+    ],
+    "freq_a": 1,
+    "freq_b": 490
+  },
+  {
+    "delegate_id": "13566",
+    "anchor": "van slingelandt van goidschalxoord",
+    "patterns": [
+      "van Goidschalxoord",
+      "van Slingelandt van Goid"
+    ],
+    "freq_a": 2,
+    "freq_b": 2
+  },
+  {
+    "delegate_id": "17308",
+    "anchor": "van lynden tot hemmen",
+    "patterns": [
+      "Hemmen",
+      "Van Lynden"
+    ],
+    "freq_a": 1,
+    "freq_b": 581
+  },
+  {
+    "delegate_id": "18379",
+    "anchor": "d' ablaing van giessenburgh",
+    "patterns": [
+      "d' Ablaing",
+      "dAblaingGiessenburgh"
+    ],
+    "freq_a": 26,
+    "freq_b": 45
+  },
+  {
+    "delegate_id": "17128",
+    "anchor": "van iddekinge",
+    "patterns": [
+      "Iddekingo",
+      "van Id"
+    ],
+    "freq_a": 3,
+    "freq_b": 1
+  },
+  {
+    "delegate_id": "17128",
+    "anchor": "van iddekinge",
+    "patterns": [
+      "Iddekinve",
+      "van Id"
+    ],
+    "freq_a": 2,
+    "freq_b": 1
+  },
+  {
+    "delegate_id": "17128",
+    "anchor": "van iddekinge",
+    "patterns": [
+      "Iddelinge",
+      "van Id"
+    ],
+    "freq_a": 1,
+    "freq_b": 1
+  },
+  {
+    "delegate_id": "20162",
+    "anchor": "kniphuysen tot ulrum",
+    "patterns": [
+      "Kniphuysen",
+      "tl- rum"
+    ],
+    "freq_a": 33,
+    "freq_b": 1
+  },
+  {
+    "delegate_id": "17128",
+    "anchor": "van iddekinge",
+    "patterns": [
+      "Idelinge",
+      "van Idd"
+    ],
+    "freq_a": 1,
+    "freq_b": 2
+  },
+  {
+    "delegate_id": "20162",
+    "anchor": "kniphuysen tot ulrum",
+    "patterns": [
+      "Kniphuysen",
+      "Ulrum"
+    ],
+    "freq_a": 33,
+    "freq_b": 5
+  },
+  {
+    "delegate_id": "18379",
+    "anchor": "d' ablaing van giessenburgh",
+    "patterns": [
+      "d Ablaing",
+      "dAbaing Giessenburgh"
+    ],
+    "freq_a": 2,
+    "freq_b": 3
+  },
+  {
+    "delegate_id": "17128",
+    "anchor": "van iddekinge",
+    "patterns": [
+      "Iddckinge",
+      "van Id"
+    ],
+    "freq_a": 2,
+    "freq_b": 1
+  },
+  {
+    "delegate_id": "17128",
+    "anchor": "van iddekinge",
+    "patterns": [
+      "Iddeklnge",
+      "van Id"
+    ],
+    "freq_a": 1,
+    "freq_b": 1
+  },
+  {
+    "delegate_id": "18379",
+    "anchor": "d' ablaing van giessenburgh",
+    "patterns": [
+      "d Ablaing",
+      "lAbaing Giessenburgh"
+    ],
+    "freq_a": 2,
+    "freq_b": 1
+  },
+  {
+    "delegate_id": "18379",
+    "anchor": "d' ablaing van giessenburgh",
+    "patterns": [
+      "d AbaingGiessenburgh",
+      "d Ablaing"
+    ],
+    "freq_a": 1,
+    "freq_b": 2
+  },
+  {
+    "delegate_id": "16184",
+    "anchor": "uterwyck tot alerdinck",
+    "patterns": [
+      "Uytterwyck",
+      "van Alerdinck"
+    ],
+    "freq_a": 1,
+    "freq_b": 5
+  },
+  {
+    "delegate_id": "16184",
+    "anchor": "uterwyck tot alerdinck",
+    "patterns": [
+      "Uytterwyck",
+      "Van Alerdinck"
+    ],
+    "freq_a": 1,
+    "freq_b": 10
+  },
+  {
+    "delegate_id": "16184",
+    "anchor": "uterwyck tot alerdinck",
+    "patterns": [
+      "Uterwijck",
+      "Van Alerdinck"
+    ],
+    "freq_a": 12,
+    "freq_b": 10
+  },
+  {
+    "delegate_id": "16184",
+    "anchor": "uterwyck tot alerdinck",
+    "patterns": [
+      "Uterwijck",
+      "van Alerdinck"
+    ],
+    "freq_a": 12,
+    "freq_b": 5
+  },
+  {
+    "delegate_id": "16231",
+    "anchor": "sloet tot de haer",
+    "patterns": [
+      "Sloet tot de",
+      "Stoet"
+    ],
+    "freq_a": 1,
+    "freq_b": 1
+  },
+  {
+    "delegate_id": "16231",
+    "anchor": "sloet tot de haer",
+    "patterns": [
+      "Sloes",
+      "Sloet tot de"
+    ],
+    "freq_a": 2,
+    "freq_b": 1
+  },
+  {
+    "delegate_id": "16231",
+    "anchor": "sloet tot de haer",
+    "patterns": [
+      "Gloet",
+      "Sloet tot de"
+    ],
+    "freq_a": 1,
+    "freq_b": 1
+  },
+  {
+    "delegate_id": "16231",
+    "anchor": "sloet tot de haer",
+    "patterns": [
+      "Sloet tot de",
+      "Sluet"
+    ],
+    "freq_a": 1,
+    "freq_b": 1
+  },
+  {
+    "delegate_id": "16231",
+    "anchor": "sloet tot de haer",
+    "patterns": [
+      "Sloet",
+      "Sloet tot de"
+    ],
+    "freq_a": 1770,
+    "freq_b": 1
+  },
+  {
+    "delegate_id": "16231",
+    "anchor": "sloet tot de haer",
+    "patterns": [
+      "Slcet",
+      "Sloet tot de"
+    ],
+    "freq_a": 1,
+    "freq_b": 1
+  },
+  {
+    "delegate_id": "19808",
+    "anchor": "van heeckeren tot den brantzenborgh",
+    "patterns": [
+      "Ven Heeck",
+      "van Heeckeren tot den Bran"
+    ],
+    "freq_a": 5,
+    "freq_b": 1
+  },
+  {
+    "delegate_id": "19808",
+    "anchor": "van heeckeren tot den brantzenborgh",
+    "patterns": [
+      "Van Hoeck",
+      "van Heeckeren tot den Bran"
+    ],
+    "freq_a": 1,
+    "freq_b": 1
+  },
+  {
+    "delegate_id": "18379",
+    "anchor": "d' ablaing van giessenburgh",
+    "patterns": [
+      "d' Ablaing",
+      "dAblaing Giessenburg"
+    ],
+    "freq_a": 26,
+    "freq_b": 28
+  },
+  {
+    "delegate_id": "19808",
+    "anchor": "van heeckeren tot den brantzenborgh",
+    "patterns": [
+      "van Heeckeren tot den Bran",
+      "van Het"
+    ],
+    "freq_a": 1,
+    "freq_b": 1
+  },
+  {
+    "delegate_id": "19808",
+    "anchor": "van heeckeren tot den brantzenborgh",
+    "patterns": [
+      "van Heeckeren tot den Bran",
+      "van Hooy"
+    ],
+    "freq_a": 1,
+    "freq_b": 1
+  },
+  {
+    "delegate_id": "21093",
+    "anchor": "van hambroick",
+    "patterns": [
+      "Hambroick",
+      "Hum"
+    ],
+    "freq_a": 66,
+    "freq_b": 3
+  },
+  {
+    "delegate_id": "18057",
+    "anchor": "van lynden",
+    "patterns": [
+      "Lynden",
+      "van Lyn"
+    ],
+    "freq_a": 3,
+    "freq_b": 2
+  },
+  {
+    "delegate_id": "18379",
+    "anchor": "d' ablaing van giessenburgh",
+    "patterns": [
+      "d Ablaing",
+      "dAblaingGiessenburgh"
+    ],
+    "freq_a": 2,
+    "freq_b": 45
+  },
+  {
+    "delegate_id": "18379",
+    "anchor": "d' ablaing van giessenburgh",
+    "patterns": [
+      "d' Ablaing",
+      "dAblaingGiessenburg"
+    ],
+    "freq_a": 26,
+    "freq_b": 18
+  },
+  {
+    "delegate_id": "18379",
+    "anchor": "d' ablaing van giessenburgh",
+    "patterns": [
+      "d AblaingGissenburgh",
+      "d' Ablaing"
+    ],
+    "freq_a": 1,
+    "freq_b": 26
+  },
+  {
+    "delegate_id": "18379",
+    "anchor": "d' ablaing van giessenburgh",
+    "patterns": [
+      "d AblaingGiesseburgh",
+      "d' Ablaing"
+    ],
+    "freq_a": 1,
+    "freq_b": 26
+  },
+  {
+    "delegate_id": "18379",
+    "anchor": "d' ablaing van giessenburgh",
+    "patterns": [
+      "d AblaingGiessenburg",
+      "d' Ablaing"
+    ],
+    "freq_a": 19,
+    "freq_b": 26
+  },
+  {
+    "delegate_id": "17128",
+    "anchor": "van iddekinge",
+    "patterns": [
+      "Iddekinge",
+      "van Idde"
+    ],
+    "freq_a": 647,
+    "freq_b": 2
+  },
+  {
+    "delegate_id": "16231",
+    "anchor": "sloet tot de haer",
+    "patterns": [
+      "Sloe",
+      "Sloet tot de"
+    ],
+    "freq_a": 3,
+    "freq_b": 1
+  },
+  {
+    "delegate_id": "17128",
+    "anchor": "van iddekinge",
+    "patterns": [
+      "Idaekinge",
+      "van Idde"
+    ],
+    "freq_a": 1,
+    "freq_b": 2
+  },
+  {
+    "delegate_id": "17128",
+    "anchor": "van iddekinge",
+    "patterns": [
+      "Iadekinge",
+      "van Idde"
+    ],
+    "freq_a": 1,
+    "freq_b": 2
+  },
+  {
+    "delegate_id": "17128",
+    "anchor": "van iddekinge",
+    "patterns": [
+      "Tddekinge",
+      "van Idde"
+    ],
+    "freq_a": 1,
+    "freq_b": 2
+  },
+  {
+    "delegate_id": "17128",
+    "anchor": "van iddekinge",
+    "patterns": [
+      "Iddckinge",
+      "van Idde"
+    ],
+    "freq_a": 2,
+    "freq_b": 2
+  },
+  {
+    "delegate_id": "17128",
+    "anchor": "van iddekinge",
+    "patterns": [
+      "Yddekinge",
+      "van Idde"
+    ],
+    "freq_a": 1,
+    "freq_b": 2
+  },
+  {
+    "delegate_id": "17308",
+    "anchor": "van lynden tot hemmen",
+    "patterns": [
+      "Hemmen",
+      "an Lynden"
+    ],
+    "freq_a": 1,
+    "freq_b": 2
+  },
+  {
+    "delegate_id": "17308",
+    "anchor": "van lynden tot hemmen",
+    "patterns": [
+      "Hemmen",
+      "Vau Lynden"
+    ],
+    "freq_a": 1,
+    "freq_b": 2
+  },
+  {
+    "delegate_id": "17308",
+    "anchor": "van lynden tot hemmen",
+    "patterns": [
+      "Hemmen",
+      "Vun Lynden"
+    ],
+    "freq_a": 1,
+    "freq_b": 1
+  },
+  {
+    "delegate_id": "17308",
+    "anchor": "van lynden tot hemmen",
+    "patterns": [
+      "Hemmen",
+      "nan Lynden"
+    ],
+    "freq_a": 1,
+    "freq_b": 1
+  },
+  {
+    "delegate_id": "17308",
+    "anchor": "van lynden tot hemmen",
+    "patterns": [
+      "Hemmen",
+      "van Leynden"
+    ],
+    "freq_a": 1,
+    "freq_b": 3
+  },
+  {
+    "delegate_id": "16184",
+    "anchor": "uterwyck tot alerdinck",
+    "patterns": [
+      "Uytterwyck",
+      "Van Alderdinck"
+    ],
+    "freq_a": 1,
+    "freq_b": 19
   }
 ]

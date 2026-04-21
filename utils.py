@@ -79,6 +79,25 @@ BASEDIR = Path("/Users/rikhoekstra/surfdrive (2)/Republic/gedelegeerden")
 
 _WS = Path(__file__).parent   # workspace root — always checked first
 
+# Data-archive manifest (republic_delegates_data repo)
+MANIFEST_FILE: Path = Path("/Users/rikhoekstra/develop/republic_delegates_data/MANIFEST.toml")
+
+
+def _manifest_path(section: str, key: str) -> Path | None:
+    """Return the absolute Path for a relative path stored in MANIFEST.toml, or None."""
+    if not MANIFEST_FILE.exists():
+        return None
+    try:
+        import tomllib  # type: ignore[import]
+        manifest = tomllib.loads(MANIFEST_FILE.read_text())
+        rel = manifest.get(section, {}).get(key, "")
+        if rel:
+            return MANIFEST_FILE.parent / rel
+    except Exception:
+        pass
+    return None
+
+
 # Persons (unique delegates)
 PERSONS_CANDIDATES: list[Path] = [
     _WS / "uq_delegates_updated_20260225.xlsx",
@@ -87,11 +106,24 @@ PERSONS_CANDIDATES: list[Path] = [
 ]
 
 # Occurrences (meeting records)
-OCCURRENCES_CANDIDATES: list[Path] = [
-    _WS / "delegates_18ee_w_correcties_20260123_marked.xlsx",
-    BASEDIR / "output" / "delegates_18ee_w_correcties_20260123_marked.xlsx",
-    BASEDIR / "delegates_18ee_w_correcties_20260123_marked.xlsx",
-]
+# OCCURRENCES_OUTPUT is the canonical write destination for the baked parquet
+# (corrections applied, lives in the workspace as a staging area).
+# MANIFEST_FILE[1705_1795].occurrences_baked records the archive copy path.
+OCCURRENCES_OUTPUT: Path = _WS / "delegates_18ee_w_correcties_baked.parquet"
+
+def _occurrences_candidates() -> list[Path]:
+    candidates: list[Path] = [OCCURRENCES_OUTPUT]
+    manifest_baked = _manifest_path("1705_1795", "occurrences_baked")
+    if manifest_baked is not None and manifest_baked not in candidates:
+        candidates.append(manifest_baked)
+    candidates += [
+        _WS / "delegates_18ee_w_correcties_20260123_marked.xlsx",
+        BASEDIR / "output" / "delegates_18ee_w_correcties_20260123_marked.xlsx",
+        BASEDIR / "delegates_18ee_w_correcties_20260123_marked.xlsx",
+    ]
+    return candidates
+
+OCCURRENCES_CANDIDATES: list[Path] = _occurrences_candidates()
 
 # Abbreviation / authority file — also bio source (birth_year, death_year, hlife)
 ABBRD_CANDIDATES: list[Path] = [

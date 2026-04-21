@@ -184,7 +184,7 @@ def render(
                 # get a clean anchor for the concat detector.
                 _synonyms_for_scan = load_pattern_synonyms()
                 at = build_anchor_table(df_merged, synonyms=_synonyms_for_scan)
-                concat_df = detect_concat_errors(
+                concat_df, rejected_df = detect_concat_errors(
                     df_merged, at=at,
                     t_concat=t_concat,
                     min_len_ratio=min_len_ratio,
@@ -192,6 +192,7 @@ def render(
                     province=province_val,
                     year_min=int(year_min),
                     year_max=int(year_max),
+                    return_rejected=True,
                 )
                 frag_df = detect_fragment_errors(
                     df_merged, at=at,
@@ -202,10 +203,22 @@ def render(
                 )
                 elapsed = time.perf_counter() - t0
 
+            # Build (pattern, delegate_id) → [row_indices] from scan-time df_merged.
+            # Stored so reassign buttons work even after later corrections have
+            # changed the live delegate_id values for those rows.
+            _snap = df_merged[["pattern", "delegate_id"]].copy()
+            _snap["_p"] = _snap["pattern"].astype(str)
+            _snap["_d"] = _snap["delegate_id"].astype(str)
+            _rim: dict[tuple[str, str], list[int]] = {}
+            for (_p, _d), _g in _snap.groupby(["_p", "_d"], observed=True):
+                _rim[(_p, _d)] = _g.index.tolist()
+
             st.session_state["merge_candidates"] = {
                 "concat": concat_df,
                 "frag":   frag_df,
                 "at":     at,
+                "row_index_map": _rim,
+                "rejected": rejected_df,
             }
             st.session_state["merge_scan_elapsed"]  = elapsed
             st.session_state["merge_scan_n_concat"] = len(concat_df)
@@ -243,7 +256,7 @@ def render(
         dismissals = load_merge_dismissals()
         synonyms   = load_pattern_synonyms()
 
-        tab_c, tab_f = st.tabs(["🔀 Concat candidates", "🧩 Fragment candidates"])
+        tab_c, tab_f = st.tabs(["🔀 Concat candidates", "🧩 Fragment candidates"], key="mrg_subtabs")
 
         # ══════════════════════════════════════════════════════════════════
         # A) CONCAT CANDIDATES
@@ -324,24 +337,22 @@ def render(
 
                     col_a, col_b, col_d = st.columns(3)
 
+                    _rim = candidates.get("row_index_map", {})
+                    _affected_rows = _rim.get((str(row["pattern"]), did), [])
+
                     with col_a:
                         if st.button(
                             f"⬅ Reassign ALL → {_name(left_id)}",
                             key="mrg_reassign_left",
                             help=f"Set delegate_id = {left_id} for every occurrence of this pattern.",
                         ):
-                            mask = (
-                                (df_merged["pattern"].astype(str) == str(row["pattern"]))
-                                & (df_merged["delegate_id"].astype(str) == did)
-                            )
-                            affected = df_merged.index[mask].tolist()
-                            for ridx in affected:
+                            for ridx in _affected_rows:
                                 save_correction(ridx, left_id)
                             st.session_state["mrg_last_action"] = {
-                                "row_indices": affected,
-                                "label": f"Reassigned {len(affected)} row(s) of \u00ab{row['pattern']}\u00bb \u2192 {left_id} ({_name(left_id)})",
+                                "row_indices": _affected_rows,
+                                "label": f"Reassigned {len(_affected_rows)} row(s) of \u00ab{row['pattern']}\u00bb \u2192 {left_id} ({_name(left_id)})",
                             }
-                            st.success(f"Reassigned {len(affected)} row(s) → {left_id} ({_name(left_id)})")
+                            st.success(f"Reassigned {len(_affected_rows)} row(s) → {left_id} ({_name(left_id)})")
                             st.rerun()
 
                     with col_b:
@@ -350,18 +361,13 @@ def render(
                             key="mrg_reassign_right",
                             help=f"Set delegate_id = {right_id} for every occurrence of this pattern.",
                         ):
-                            mask = (
-                                (df_merged["pattern"].astype(str) == str(row["pattern"]))
-                                & (df_merged["delegate_id"].astype(str) == did)
-                            )
-                            affected = df_merged.index[mask].tolist()
-                            for ridx in affected:
+                            for ridx in _affected_rows:
                                 save_correction(ridx, right_id)
                             st.session_state["mrg_last_action"] = {
-                                "row_indices": affected,
-                                "label": f"Reassigned {len(affected)} row(s) of \u00ab{row['pattern']}\u00bb \u2192 {right_id} ({_name(right_id)})",
+                                "row_indices": _affected_rows,
+                                "label": f"Reassigned {len(_affected_rows)} row(s) of \u00ab{row['pattern']}\u00bb \u2192 {right_id} ({_name(right_id)})",
                             }
-                            st.success(f"Reassigned {len(affected)} row(s) → {right_id} ({_name(right_id)})")
+                            st.success(f"Reassigned {len(_affected_rows)} row(s) → {right_id} ({_name(right_id)})")
                             st.rerun()
 
                     with col_d:
@@ -391,10 +397,6 @@ def render(
                             label_visibility="collapsed",
                         )
                     cid = custom_id.strip()
-                    _mask_all = (
-                        (df_merged["pattern"].astype(str) == str(row["pattern"]))
-                        & (df_merged["delegate_id"].astype(str) == did)
-                    )
                     with col_oa:
                         if st.button(
                             f"⬅ Left → custom",
@@ -402,15 +404,14 @@ def render(
                             disabled=not cid,
                             help=f"Reassign all occurrences to {cid} (override proposed left: {left_id})",
                         ):
-                            affected = df_merged.index[_mask_all].tolist()
-                            for ridx in affected:
+                            for ridx in _affected_rows:
                                 save_correction(ridx, cid)
                             st.session_state["mrg_last_action"] = {
-                                "row_indices": affected,
-                                "label": f"Reassigned {len(affected)} row(s) of \u00ab{row['pattern']}\u00bb \u2192 {cid} ({_name(cid)}) [left override; was {left_id}]",
+                                "row_indices": _affected_rows,
+                                "label": f"Reassigned {len(_affected_rows)} row(s) of \u00ab{row['pattern']}\u00bb \u2192 {cid} ({_name(cid)}) [left override; was {left_id}]",
                             }
                             st.success(
-                                f"Reassigned {len(affected)} row(s) → {cid} ({_name(cid)})  "
+                                f"Reassigned {len(_affected_rows)} row(s) → {cid} ({_name(cid)})  "
                                 f"[left override; was {left_id}]"
                             )
                             st.rerun()
@@ -421,15 +422,14 @@ def render(
                             disabled=not cid,
                             help=f"Reassign all occurrences to {cid} (override proposed right: {right_id})",
                         ):
-                            affected = df_merged.index[_mask_all].tolist()
-                            for ridx in affected:
+                            for ridx in _affected_rows:
                                 save_correction(ridx, cid)
                             st.session_state["mrg_last_action"] = {
-                                "row_indices": affected,
-                                "label": f"Reassigned {len(affected)} row(s) of \u00ab{row['pattern']}\u00bb \u2192 {cid} ({_name(cid)}) [right override; was {right_id}]",
+                                "row_indices": _affected_rows,
+                                "label": f"Reassigned {len(_affected_rows)} row(s) of \u00ab{row['pattern']}\u00bb \u2192 {cid} ({_name(cid)}) [right override; was {right_id}]",
                             }
                             st.success(
-                                f"Reassigned {len(affected)} row(s) → {cid} ({_name(cid)})  "
+                                f"Reassigned {len(_affected_rows)} row(s) → {cid} ({_name(cid)})  "
                                 f"[right override; was {right_id}]"
                             )
                             st.rerun()
@@ -552,6 +552,37 @@ def render(
                 else:
                     st.caption("Select a row above to see available actions.")
 
+        # ── Diagnostic: silently dropped candidates ────────────────────────
+        rejected_df: pd.DataFrame = candidates.get("rejected", pd.DataFrame())
+        if not rejected_df.empty:
+            n_no_nbr   = int((rejected_df["rejection_reason"] == "no_neighbors").sum())
+            n_score    = int((rejected_df["rejection_reason"] == "score_too_high").sum())
+            with st.expander(
+                f"🔍 Silently dropped candidates  ({len(rejected_df)} total: "
+                f"{n_no_nbr} no-neighbors, {n_score} score-too-high)",
+                expanded=False,
+            ):
+                st.caption(
+                    "These patterns passed the length/space pre-filter but were not "
+                    "surfaced as concat candidates.\n\n"
+                    f"- **no_neighbors** ({n_no_nbr}): no adjacent delegate was found "
+                    f"within ±{st.session_state.get('mrg_nbr_window', 2)} rows on the same day.\n"
+                    f"- **score_too_high** ({n_score}): neighbors were found but no split "
+                    f"scored ≤ {st.session_state.get('mrg_t_concat', 0.20):.2f} on both halves."
+                )
+                filter_reason = st.selectbox(
+                    "Filter by reason",
+                    options=["all", "no_neighbors", "score_too_high"],
+                    key="mrg_diag_filter",
+                )
+                _diag = rejected_df if filter_reason == "all" else rejected_df[
+                    rejected_df["rejection_reason"] == filter_reason
+                ]
+                if not _diag.empty and "delegate_name" not in _diag.columns:
+                    _diag = _diag.copy()
+                    _diag.insert(1, "delegate_name", _diag["delegate_id"].map(_name))
+                st.dataframe(_diag.reset_index(drop=True), width='stretch')
+
         # ── Synonym register ───────────────────────────────────────────────
         with st.expander("📄 Synonym register (for export appendix)", expanded=False):
             synonyms_now = load_pattern_synonyms()
@@ -569,4 +600,4 @@ def render(
                     )
                 if "delegate_id" in syn_df.columns:
                     syn_df.insert(0, "name", syn_df["delegate_id"].map(_name))
-                st.dataframe(syn_df, use_container_width=True)
+                st.dataframe(syn_df, width='stretch')

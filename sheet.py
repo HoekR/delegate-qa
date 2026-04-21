@@ -50,6 +50,7 @@ from utils import (
     load_approved_corrections,
     load_pattern_status,
     normalize_config,
+    OCCURRENCES_OUTPUT,
     rerun,
     save_config,
     save_corrections,
@@ -567,16 +568,26 @@ with st.sidebar:
 
     # ── Finalize: export corrected dataset ──────────────────────────────────
     # Parquet (fast even for 430k rows, ~1–2s) — use for archiving / next run
+    # Apply all three correction tiers in priority order: staged < approved < active
+    def _baked_df() -> "pd.DataFrame":
+        d = apply_corrections(df_merged, load_staged_corrections())
+        d = apply_corrections(d, load_approved_corrections())
+        d = apply_corrections(d, corrections)
+        return d
+
     buf_parq = io.BytesIO()
     if not df_merged.empty:
-        apply_corrections(df_merged, corrections).to_parquet(buf_parq, index=False)
+        _baked_df().to_parquet(buf_parq, index=False)
         buf_parq.seek(0)
         st.sidebar.download_button(
             "⬇ Export corrected (parquet)",
             data=buf_parq,
-            file_name="corrections_export.parquet",
+            file_name=OCCURRENCES_OUTPUT.name,
             mime="application/octet-stream",
         )
+        if st.sidebar.button("💾 Save baked to disk", key="save_baked_to_disk"):
+            _baked_df().to_parquet(OCCURRENCES_OUTPUT, index=False)
+            st.sidebar.success(f"Saved → {OCCURRENCES_OUTPUT.name}")
     # Changed rows only — tiny Excel, instant
     changed_idxs = [ridx for ridx in corrections if ridx in df_merged.index]
     if changed_idxs:

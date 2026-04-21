@@ -48,16 +48,55 @@ _SESSION_HEADER_RE = re.compile(
 )
 
 # Default thresholds (all overrideable via function parameters)
-DEFAULT_T_CONCAT        = 0.20   # max normalised edit dist for each half of a concat
+DEFAULT_T_CONCAT        = 0.35  # max normalised edit dist for each half of a concat
 DEFAULT_T_FRAG          = 0.15   # max normalised edit dist for reconstructed vs anchor
 DEFAULT_MIN_LEN_RATIO   = 1.40   # pattern must be ≥ this × anchor to be a concat candidate
 DEFAULT_NEIGHBOR_WINDOW = 2      # how many adjacent rows (±) to inspect per day
 DEFAULT_MIN_PATTERNS    = 3      # min distinct patterns a delegate needs for frag check
+DEFAULT_T_COMPOUND      = 0.25   # if full pattern scores ≤ this vs own delegate's patterns → compound name, skip
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Dutch/French name infixes (tussenvoegsels) and article-style prefixes.
+# Sourced from huygens_name_index/names/common.py.
+# Used to produce an infix-stripped variant for scoring so that a leading
+# "van" / "van der" / "d'" etc. does not inflate the edit distance when the
+# core surname matches perfectly.
+# ---------------------------------------------------------------------------
+_INFIXES: tuple[str, ...] = (
+    # tussenvoegsels
+    "van der", "van den", "van de", "van 't", "van het", "van",
+    "in 't",
+    "ten", "ter", "te",
+    "den", "der", "des", "de", "di",
+    "thoe", "tot",
+    "d'", "l'",
+    "le", "la", "du", "des",
+    "à", "\xe0",
+    "en", "het", "of",
+    # article-style prefixes from PREFIXES list
+    "'s-", "'s ", "'t ", "t'",
+)
+# Pre-compiled: longest-first so "van der" is tried before "van"
+_INFIXES_SORTED = sorted(_INFIXES, key=len, reverse=True)
+_INFIX_RE = re.compile(
+    r"^(?:" + "|".join(re.escape(p) for p in _INFIXES_SORTED) + r")\s*",
+    re.IGNORECASE,
+)
+
+
+def _strip_infix(s: str) -> str:
+    """Remove a leading Dutch/French name infix (tussenvoegsel) from s.
+
+    Applies the substitution at most once; returns the remainder stripped of
+    leading whitespace.  If no infix is found, returns s unchanged.
+    """
+    return _INFIX_RE.sub("", s).strip()
+
 
 def _norm(s: str) -> str:
     """Lowercase and collapse whitespace.  Van/van-der prefixes are kept
@@ -300,10 +339,12 @@ def detect_concat_errors(
     t_concat:         float = DEFAULT_T_CONCAT,
     min_len_ratio:    float = DEFAULT_MIN_LEN_RATIO,
     neighbor_window:  int   = DEFAULT_NEIGHBOR_WINDOW,
+    t_compound:       float | None = DEFAULT_T_COMPOUND,
     province:         str | None = None,
     year_min:         int | None = None,
     year_max:         int | None = None,
-) -> pd.DataFrame:
+    return_rejected:  bool  = False,
+) -> pd.DataFrame | tuple[pd.DataFrame, pd.DataFrame]:
     """Detect occurrences whose pattern looks like two names fused together.
 
     Parameters
@@ -325,10 +366,22 @@ def detect_concat_errors(
     year_min / year_max :
         If given, restrict to this year range (uses 'j' column).
 
+    t_compound :
+        If set, skip any candidate whose full (unsplit) pattern scores ≤
+        t_compound against the candidate delegate's own patterns — these are
+        likely compound surnames, not genuine concats.  Set to None to
+        disable.  Default: DEFAULT_T_COMPOUND.
+    return_rejected :
+        If True, return a tuple (results_df, rejected_df) where rejected_df
+        contains all pre-filter candidates that did not make it into results,
+        with a 'rejection_reason' column: 'no_neighbors', 'score_too_high',
+        'compound_name'.  Useful for diagnosing how many patterns are silently
+        dropped.
+
     Returns
     -------
-    pd.DataFrame with columns matching ConcatCandidate fields, sorted by
-    combined_score ascending (best matches first).
+    pd.DataFrame with columns matching ConcatCandidate fields (or tuple if
+    return_rejected=True).
     """
     df = df_merged.copy()
 
@@ -341,7 +394,8 @@ def detect_concat_errors(
         df = df[df["j"].fillna(9999) <= year_max]
 
     if df.empty:
-        return pd.DataFrame(columns=list(ConcatCandidate._fields))
+        empty = pd.DataFrame(columns=list(ConcatCandidate._fields))
+        return (empty, pd.DataFrame(columns=["pattern", "delegate_id", "anchor", "rejection_reason"])) if return_rejected else empty
 
     if at is None:
         at = build_anchor_table(df_merged)
@@ -391,9 +445,11 @@ def detect_concat_errors(
     anchor_has_space = dids.map(lambda d: " " in anchors.get(d, ""))
 
     # Candidate if: long relative to anchor, OR has extra space anchor doesn't
+    # (but the space condition also requires the pattern to be at least as long
+    # as the anchor — a concat is always longer than either constituent name).
     candidate_mask = (
         (pat_lens / anchor_lens >= min_len_ratio)
-        | (has_space & ~anchor_has_space)
+        | (has_space & ~anchor_has_space & (pat_lens >= anchor_lens))
     )
     # Exclude very short patterns (noise)
     candidate_mask &= pat_lens >= 6
@@ -411,6 +467,9 @@ def detect_concat_errors(
     )
 
     results: list[ConcatCandidate] = []
+    rejected: list[dict] = []  # rejection_reason tracking
+
+    # (compound pre-check uses per-candidate own-patterns, computed inside the loop)
 
     # Merge positional info onto candidates
     df_cands = df_cands.join(
@@ -445,7 +504,29 @@ def detect_concat_errors(
                         neighbor_patterns[nbr_id] = nbr_pats
 
         if not neighbor_patterns:
+            rejected.append({"pattern": raw_pat, "delegate_id": did,
+                             "anchor": anchor, "rejection_reason": "no_neighbors"})
             continue
+
+        # Compound-name pre-check: if the full (unsplit) pattern closely matches
+        # this delegate's own patterns, it is likely a compound surname, not a
+        # genuine concat.  Score only against the candidate's own patterns (not
+        # the global anchor list, which causes false suppressions).
+        if t_compound is not None:
+            own_pats = all_patterns.get(did, [anchor] if anchor else [])
+            own_norms = [_norm(p) for p in own_pats if p]
+            if own_norms:
+                own_score = min(_lev_dist(pat_norm, p) for p in own_norms)
+                pat_bare  = _strip_infix(pat_norm)
+                if pat_bare:
+                    own_bare = [_strip_infix(p) for p in own_norms if _strip_infix(p)]
+                    if own_bare:
+                        own_score = min(own_score,
+                                        min(_lev_dist(pat_bare, pb) for pb in own_bare))
+                if own_score <= t_compound:
+                    rejected.append({"pattern": raw_pat, "delegate_id": did,
+                                     "anchor": anchor, "rejection_reason": "compound_name"})
+                    continue
 
         # Try all split points
         best: tuple[float, str, str, str, str, float, float] | None = None
@@ -457,18 +538,32 @@ def detect_concat_errors(
                 continue
 
             # Score of each half against own anchor
-            left_vs_own  = _lev_dist(left,  anchor) if anchor else 1.0
-            right_vs_own = _lev_dist(right, anchor) if anchor else 1.0
+            anchor_bare  = _strip_infix(anchor) if anchor else ""
+            left_vs_own  = min(_lev_dist(left, anchor), _lev_dist(_strip_infix(left), anchor_bare)) if anchor else 1.0
+            right_vs_own = min(_lev_dist(right, anchor), _lev_dist(_strip_infix(right), anchor_bare)) if anchor else 1.0
 
             # Find best-matching neighbor for each half.
             # Exact match against any known variant scores 0.0; otherwise
             # take the minimum Levenshtein distance across all variants.
             best_left_id, best_left_score   = "", 1.0
             best_right_id, best_right_score = "", 1.0
+            left_bare  = _strip_infix(left)
+            right_bare = _strip_infix(right)
             for nbr_id, pat_list in neighbor_patterns.items():
                 pat_set = set(pat_list)
-                ld = 0.0 if left  in pat_set else min(_lev_dist(left,  p) for p in pat_list)
-                rd = 0.0 if right in pat_set else min(_lev_dist(right, p) for p in pat_list)
+                # Score against the neighbor pattern and also against the
+                # infix-stripped version of the neighbor; take the minimum so
+                # that a leading "van" / "d'" doesn't inflate the distance.
+                def _score_half(half: str, bare: str, pat_list: list, pat_set: set) -> float:
+                    if half in pat_set:
+                        return 0.0
+                    raw_min = min(_lev_dist(half, p) for p in pat_list)
+                    # also try bare half vs bare neighbor patterns
+                    bare_min = min(_lev_dist(bare, _strip_infix(p)) for p in pat_list) if bare else raw_min
+                    return min(raw_min, bare_min)
+
+                ld = _score_half(left,  left_bare,  pat_list, pat_set)
+                rd = _score_half(right, right_bare, pat_list, pat_set)
                 if ld < best_left_score:
                     best_left_score  = ld
                     best_left_id     = nbr_id
@@ -509,6 +604,8 @@ def detect_concat_errors(
                             best_left_score, right_vs_own)
 
         if best is None:
+            rejected.append({"pattern": raw_pat, "delegate_id": did,
+                             "anchor": anchor, "rejection_reason": "score_too_high"})
             continue
 
         combined, sl, sr, lid, rid, ls, rs = best
@@ -528,8 +625,17 @@ def detect_concat_errors(
             n_occurrences     = int(occ_n),
         ))
 
+    rej_df = (
+        pd.DataFrame(rejected)
+        .drop_duplicates(subset=["pattern", "delegate_id"])
+        .reset_index(drop=True)
+        if rejected
+        else pd.DataFrame(columns=["pattern", "delegate_id", "anchor", "rejection_reason"])
+    )
+
     if not results:
-        return pd.DataFrame(columns=list(ConcatCandidate._fields))
+        empty = pd.DataFrame(columns=list(ConcatCandidate._fields))
+        return (empty, rej_df) if return_rejected else empty
 
     df_out = pd.DataFrame(results)
     # Deduplicate: one row per (pattern, delegate_id) — keep the best-scoring
@@ -538,7 +644,7 @@ def detect_concat_errors(
         .drop_duplicates(subset=["pattern", "delegate_id"])
         .reset_index(drop=True)
     )
-    return df_out
+    return (df_out, rej_df) if return_rejected else df_out
 
 
 # ---------------------------------------------------------------------------
@@ -681,6 +787,7 @@ def detect_all(
     t_frag:          float = DEFAULT_T_FRAG,
     min_len_ratio:   float = DEFAULT_MIN_LEN_RATIO,
     neighbor_window: int   = DEFAULT_NEIGHBOR_WINDOW,
+    t_compound:      float | None = DEFAULT_T_COMPOUND,
     min_patterns:    int   = DEFAULT_MIN_PATTERNS,
     province:        str | None = None,
     year_min:        int | None = None,
@@ -701,7 +808,7 @@ def detect_all(
     concat_df = detect_concat_errors(
         df_merged, at=at,
         t_concat=t_concat, min_len_ratio=min_len_ratio,
-        neighbor_window=neighbor_window,
+        neighbor_window=neighbor_window, t_compound=t_compound,
         province=province, year_min=year_min, year_max=year_max,
     )
     t2 = time.perf_counter()
