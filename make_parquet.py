@@ -29,6 +29,9 @@ def convert(root: Path = Path(".")) -> None:
             # Parquet requires uniform types; cast remaining mixed object columns to str
             for col in df.select_dtypes(include="object").columns:
                 df[col] = df[col].where(df[col].isna(), df[col].astype(str))
+            # Strip trailing/leading whitespace from all string columns
+            for col in df.select_dtypes(include="object").columns:
+                df[col] = df[col].str.strip()
             df.to_parquet(out, index=False)
             if id_cols:
                 print(f"  (id cols → str: {', '.join(id_cols)})")

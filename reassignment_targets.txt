@@ -1,0 +1,40 @@
+# Reassignment targets for top violation clusters
+# Format: wrong_id | wrong_name (lifespan) | pattern | correct_id | correct_name (lifespan)
+
+15127 | Wassenaer, Carel Lodewijk (1685-1751, viols 1754-1795)
+  -> Van Wassenaer (1517x)           => 12372  Wassenaer Obdam, Carel George van (1733-1800)
+  -> Steyn (1474x)                   => 13568  Steyn, Pieter (1706-1772)
+  -> Van Wassenaer Starrenburg (540x) => 13555  Wassenaer, Willem Lodewijk Starrenburg (1744-1833)
+  -> Parvé/Santheuvel (473x)         => 13563  Santheuvel, Bartholomeus van den (1730-1784)
+  -> Bleyswijck (411x)               => 14029  Bleyswijk, Pieter van (1724-1790)
+  -> Bentinck (187x)                 => ?      (still to look up)
+
+432  | Essenius, Samuel (1755-1811, viols 1705-1752)
+  -> van Essen/Essenius (3243x)      => 16932  Essenius, Leonard (1676-1748)
+
+19808 | Heeckeren van Brantsenburg, Derk Jan van (1742-1796, viols 1705-1740)
+  -> van Heeckeren van Brantsenburg (1317x) => 17295  Heeckeren tot den Brantsenburg, Walraven Robbert van (1704-1758)
+  -> Umbgrove (4x)                   => ?      (minor, skip?)
+
+17128 | Iddekinge, Rembt (1636-1719, viols 1720-1747)
+  -> Iddekinge (1314x)               => 17965  Iddekinge, Tobias Jan van (1689-1759)
+
+14226 | Lestevenon, Daniel (1660-1736, viols 1737-1795)
+  -> Pesters (720x)                  => 19203  Pesters, Balthasar Constantijn van Lunenburg en Sandenburg (1731-1822)
+  -> van Citters (567x)              => 14076 or 15995  (van Citters)
+  -> Groeninx/Lestevenon (280x)      => 13998  Lestevenon, Willem Anne Hazerswoude (1750-1816)
+  -> Heinsius/Spanbroeck (39x)       => 14076  Heinsius (1753-1823)
+  -> vander Heim (28x)               => ?      (still to look up)
+
+13573 | Bleyswijk, Hendrik Ewoutsz. van (1628-1703, viols 1779-1787)
+  -> Bleyswijck (1157x)              => 14029  Bleyswijk, Pieter van (1724-1790)
+
+# Previously diagnosed (from prior session):
+16189 | Rouse (1702-1780, viols 1782-1795)       => 16279  Sloet tot de Hare, Roelof (1717-1790)
+16120 | van Dedem van Gelder (1687-1759, viols 1760-1782) => 16192  (van Pallandt tot Glinthuis)
+14024 | Romswinckel (1641-1720, viols 1721-1794)
+  -> van Citters                     => 14076 or 15995
+  -> van de Spiegel                  => 14030  Spiegel, Laurens Pieter van de (1737-1800)
+19809 | van der Marck (1674-1730, viols 1731-1785) => own patterns, uq death year too early
+13729 | de Neyn (1663-1716, viols 1717-1777)       => own patterns, uq death year too early
+16307 | van Isselmuden tot Zwollingerkamp (1728-1797, viols 1705-1727) => own patterns, uq birth year too late

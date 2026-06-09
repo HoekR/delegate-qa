@@ -29,6 +29,7 @@ from utils import (
     PROVINCE_ORDER,
     PROVINCE_ORDER_FILE,
     PROVINCE_RANK,
+    PERSON_COLS,
     apply_corrections,
     apply_delegate_edits,
     build_merged,
@@ -38,6 +39,7 @@ from utils import (
     enrich_persons_from_abbrd,
     get_delegate_slice,
     load_config,
+    refresh_person_columns,
     _compute_delegate_summary,
     load_corrections,
     load_staged_corrections,
@@ -246,7 +248,7 @@ try:
     _corrections = st.session_state.get("corrections", {})
     _cfg = st.session_state.get("config", {})
     if _corrections:
-        df_i = apply_corrections(df_i, _corrections, config=_cfg)
+        df_i = apply_corrections(df_i, _corrections, config=_cfg, df_p=df_p)
 
     # Capture unresolved rows (sentinel IDs -1/-20) before build_merged removes them.
     _sentinel_mask = df_i["delegate_id"].astype(str).isin({"-1", "-20"})
@@ -262,7 +264,7 @@ try:
     )
     # Apply pending corrections to all derived views so tabs reflect changes immediately.
     if _corrections:
-        df_merged = apply_corrections(df_merged, _corrections, config=_cfg)
+        df_merged = apply_corrections(df_merged, _corrections, config=_cfg, df_p=df_p)
         # Recompute summary from corrected merged rows (do not apply corrections by summary index)
         summary = _compute_delegate_summary(df_merged, df_p, name_col)
     load_error: str | None = None
@@ -570,9 +572,21 @@ with st.sidebar:
     # Parquet (fast even for 430k rows, ~1–2s) — use for archiving / next run
     # Apply all three correction tiers in priority order: staged < approved < active
     def _baked_df() -> "pd.DataFrame":
-        d = apply_corrections(df_merged, load_staged_corrections())
-        d = apply_corrections(d, load_approved_corrections())
-        d = apply_corrections(d, corrections)
+        d = apply_corrections(df_merged, load_staged_corrections(), df_p=df_p)
+        d = apply_corrections(d, load_approved_corrections(), df_p=df_p)
+        d = apply_corrections(d, corrections, df_p=df_p)
+        # Resolve merge-suffix conflicts: _p columns come from the persons table
+        # and are authoritative; drop the stale occurrence-side originals and
+        # rename _p → original name so the baked file has consistent columns.
+        p_cols = [c for c in d.columns if c.endswith("_p")]
+        for pc in p_cols:
+            base = pc[:-2]  # strip "_p"
+            if base in d.columns:
+                d = d.drop(columns=[base])
+            d = d.rename(columns={pc: base})
+        # Strip trailing/leading whitespace from all string columns
+        for col in d.select_dtypes(include="object").columns:
+            d[col] = d[col].str.strip()
         return d
 
     buf_parq = io.BytesIO()

@@ -201,6 +201,124 @@ New persistence files:
 
 ---
 
+## 8. Implemented: Suspicious-Pattern Review Workflow
+
+### 8.1 Overview
+
+The implemented approach in `fuzzy_search_poc.ipynb` uses a CSV-based review
+loop instead of the interactive tab described in §5.  The notebook is the
+working implementation; the tab is deferred.
+
+**Pipeline cells:**
+
+| Cell | Role |
+|------|------|
+| 4 | Load data; build anchor table with `build_anchor_table(df_merged, synonyms=load_pattern_synonyms())` |
+| 23 | Isolate suspicious patterns: `length_ratio > 1.4` per delegate; skip no-anchor delegates, known-invalid, known-ghost patterns |
+| 24 | Enrich each suspicious pattern with neighbor context → write `suspicious_patterns_review.csv` |
+| 25 | Stage confirmed corrections from the review CSV → `staged_corrections.json` |
+| 28 | Apply staged corrections; re-export baked parquet |
+
+### 8.2 Anchor table construction
+
+`build_anchor_table` in `pattern_merge.py` accepts a `synonyms=` list
+(from `pattern_synonyms.json`) so that ghost patterns are collapsed back
+onto their canonical before computing the anchor and `n_patterns` count.
+
+Delegates that produce no anchor (no rows in `df_merged`, or all patterns are
+ghost/invalid) are excluded from the isolation step to prevent spurious
+`length_ratio` values (which would otherwise be `len(pattern)/1 ≈ 21`).
+
+### 8.3 Review CSV columns
+
+`suspicious_patterns_review.csv` is written by cell 24.
+
+| Column | Meaning |
+|--------|---------|
+| `delegate_id` | ID of the delegate whose pattern is suspicious |
+| `delegate_name` | Human-readable name |
+| `anchor` | Delegate's anchor (modal/geslachts) pattern |
+| `pattern` | The suspicious pattern |
+| `pattern_normalised` | Pattern after OCR prefix normalisation (`vau` → `van` etc.) |
+| `length_ratio` | `len(pattern) / len(anchor)` — the reason this row is suspicious |
+| `left_half` | First half of `pattern_normalised` (by word count) |
+| `left_is_infix` | `True` if `left_half` consists entirely of Dutch/French prefix tokens (`van`, `de`, `du`, etc.) — these are likely false positives |
+| `right_half` | Second half of `pattern_normalised` |
+| `neighbor_did` | ID of the neighbor delegate whose anchor best matches `right_half` |
+| `neighbor_name` | Name of that neighbor |
+| `neighbor_anchor` | Anchor of that neighbor |
+| `neighbor_score` | Similarity score (0 = identical, 1 = completely different) |
+| `n_distinct_neighbors` | How many distinct delegates sat near this one (±5 rank positions, across all days) |
+| `to_delegate_id` | **You fill this in** — overrides `neighbor_did` as the merge target |
+| `ignore` | **You fill this in** — set to `1` (or any non-empty value) to skip the row entirely |
+| `notes` | Free text |
+
+**Sort order:** non-infix rows first (actionable), then sorted by
+`neighbor_score` ascending (best matches first), then `length_ratio`
+descending.
+
+### 8.4 Review strategy
+
+The default action is to **accept `neighbor_did`** as the merge target.
+You only need to intervene when:
+
+- `ignore` — the pattern is a false positive (infix-only left half, unusual
+  abbreviation, genuine double-barrel name, etc.)
+- `to_delegate_id` — `neighbor_did` is wrong and you know the correct target
+
+This means a first-pass review mostly consists of scanning the
+`left_is_infix` column and marking those rows `ignore=1`.  The remaining rows
+are accepted automatically.
+
+### 8.5 Staging logic (cell 25)
+
+Cell 25 reads the annotated CSV and applies the following priority:
+
+1. `ignore` non-empty → skip the row entirely
+2. `to_delegate_id` non-empty → use that as the merge target
+3. otherwise → use `neighbor_did` as the merge target
+
+For each accepted row, all `df_merged` rows that share the same
+`(delegate_id, pattern)` pair are staged in `staged_corrections.json` with
+the resolved target ID.  This means one CSV row can produce multiple staged
+entries if the suspicious pattern appears on multiple meeting days.
+
+New entries are **merged** with any existing `staged_corrections.json` (not
+overwritten), so previous manually-staged corrections are preserved.
+
+### 8.6 Dutch/French prefix handling (`name_prefixes.py`)
+
+OCR frequently garbles Dutch/French name prefixes:
+
+| Canonical | Observed OCR variants |
+|-----------|----------------------|
+| `van` | `vau`, `vn`, `ran` |
+| `van de` | `vande` |
+| `van den` | `vanden`, `vau den` |
+| `van der` | `vander`, `vau der` |
+| `de` | — |
+| `d'` | `d` (elision dropped) |
+
+`name_prefixes.py` provides `DutchPrefixMatcher` with:
+
+- `.normalize(s)` — replace leading OCR variant with canonical
+- `.strip(s)` → `StripResult(prefix, core)` — split off all prefix tokens
+- `.is_prefix_only(s)` → `True` if the string is nothing but prefix tokens
+  (used for `left_is_infix` flag)
+- `.core(s)` — normalize + strip combined
+- `.similarity(a, b)` — minimum lev-distance over raw/raw, core/core,
+  core/raw, raw/core; `@lru_cache`
+
+A module-level `matcher` instance is imported by cell 24:
+```python
+from name_prefixes import matcher as pfx
+```
+
+Short ambiguous tokens (`v`, `u`, `an`) were deliberately excluded from the
+variant table to avoid false matches against real surnames (e.g. `Ubingh`).
+
+---
+
 ## 8. Open Questions
 
 - Does the occurrences file preserve intra-day row order, or does it need to

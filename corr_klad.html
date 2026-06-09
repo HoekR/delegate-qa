@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>corr_klad.md</title>
+<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+
+<style>
+/* https://github.com/microsoft/vscode/blob/master/extensions/markdown-language-features/media/markdown.css */
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+body {
+	font-family: var(--vscode-markdown-font-family, -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif);
+	font-size: var(--vscode-markdown-font-size, 14px);
+	padding: 0 26px;
+	line-height: var(--vscode-markdown-line-height, 22px);
+	word-wrap: break-word;
+}
+
+#code-csp-warning {
+	position: fixed;
+	top: 0;
+	right: 0;
+	color: white;
+	margin: 16px;
+	text-align: center;
+	font-size: 12px;
+	font-family: sans-serif;
+	background-color:#444444;
+	cursor: pointer;
+	padding: 6px;
+	box-shadow: 1px 1px 1px rgba(0,0,0,.25);
+}
+
+#code-csp-warning:hover {
+	text-decoration: none;
+	background-color:#007acc;
+	box-shadow: 2px 2px 2px rgba(0,0,0,.25);
+}
+
+body.scrollBeyondLastLine {
+	margin-bottom: calc(100vh - 22px);
+}
+
+body.showEditorSelection .code-line {
+	position: relative;
+}
+
+body.showEditorSelection .code-active-line:before,
+body.showEditorSelection .code-line:hover:before {
+	content: "";
+	display: block;
+	position: absolute;
+	top: 0;
+	left: -12px;
+	height: 100%;
+}
+
+body.showEditorSelection li.code-active-line:before,
+body.showEditorSelection li.code-line:hover:before {
+	left: -30px;
+}
+
+.vscode-light.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.15);
+}
+
+.vscode-light.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.40);
+}
+
+.vscode-light.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-dark.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.4);
+}
+
+.vscode-dark.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.60);
+}
+
+.vscode-dark.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-high-contrast.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 160, 0, 0.7);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 160, 0, 1);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+img {
+	max-width: 100%;
+	max-height: 100%;
+}
+
+a {
+	text-decoration: none;
+}
+
+a:hover {
+	text-decoration: underline;
+}
+
+a:focus,
+input:focus,
+select:focus,
+textarea:focus {
+	outline: 1px solid -webkit-focus-ring-color;
+	outline-offset: -1px;
+}
+
+hr {
+	border: 0;
+	height: 2px;
+	border-bottom: 2px solid;
+}
+
+h1 {
+	padding-bottom: 0.3em;
+	line-height: 1.2;
+	border-bottom-width: 1px;
+	border-bottom-style: solid;
+}
+
+h1, h2, h3 {
+	font-weight: normal;
+}
+
+table {
+	border-collapse: collapse;
+}
+
+table > thead > tr > th {
+	text-align: left;
+	border-bottom: 1px solid;
+}
+
+table > thead > tr > th,
+table > thead > tr > td,
+table > tbody > tr > th,
+table > tbody > tr > td {
+	padding: 5px 10px;
+}
+
+table > tbody > tr + tr > td {
+	border-top: 1px solid;
+}
+
+blockquote {
+	margin: 0 7px 0 5px;
+	padding: 0 16px 0 10px;
+	border-left-width: 5px;
+	border-left-style: solid;
+}
+
+code {
+	font-family: Menlo, Monaco, Consolas, "Droid Sans Mono", "Courier New", monospace, "Droid Sans Fallback";
+	font-size: 1em;
+	line-height: 1.357em;
+}
+
+body.wordWrap pre {
+	white-space: pre-wrap;
+}
+
+pre:not(.hljs),
+pre.hljs code > div {
+	padding: 16px;
+	border-radius: 3px;
+	overflow: auto;
+}
+
+pre code {
+	color: var(--vscode-editor-foreground);
+	tab-size: 4;
+}
+
+/** Theming */
+
+.vscode-light pre {
+	background-color: rgba(220, 220, 220, 0.4);
+}
+
+.vscode-dark pre {
+	background-color: rgba(10, 10, 10, 0.4);
+}
+
+.vscode-high-contrast pre {
+	background-color: rgb(0, 0, 0);
+}
+
+.vscode-high-contrast h1 {
+	border-color: rgb(0, 0, 0);
+}
+
+.vscode-light table > thead > tr > th {
+	border-color: rgba(0, 0, 0, 0.69);
+}
+
+.vscode-dark table > thead > tr > th {
+	border-color: rgba(255, 255, 255, 0.69);
+}
+
+.vscode-light h1,
+.vscode-light hr,
+.vscode-light table > tbody > tr + tr > td {
+	border-color: rgba(0, 0, 0, 0.18);
+}
+
+.vscode-dark h1,
+.vscode-dark hr,
+.vscode-dark table > tbody > tr + tr > td {
+	border-color: rgba(255, 255, 255, 0.18);
+}
+
+</style>
+
+<style>
+/* Tomorrow Theme */
+/* http://jmblog.github.com/color-themes-for-google-code-highlightjs */
+/* Original theme - https://github.com/chriskempson/tomorrow-theme */
+
+/* Tomorrow Comment */
+.hljs-comment,
+.hljs-quote {
+	color: #8e908c;
+}
+
+/* Tomorrow Red */
+.hljs-variable,
+.hljs-template-variable,
+.hljs-tag,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-regexp,
+.hljs-deletion {
+	color: #c82829;
+}
+
+/* Tomorrow Orange */
+.hljs-number,
+.hljs-built_in,
+.hljs-builtin-name,
+.hljs-literal,
+.hljs-type,
+.hljs-params,
+.hljs-meta,
+.hljs-link {
+	color: #f5871f;
+}
+
+/* Tomorrow Yellow */
+.hljs-attribute {
+	color: #eab700;
+}
+
+/* Tomorrow Green */
+.hljs-string,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-addition {
+	color: #718c00;
+}
+
+/* Tomorrow Blue */
+.hljs-title,
+.hljs-section {
+	color: #4271ae;
+}
+
+/* Tomorrow Purple */
+.hljs-keyword,
+.hljs-selector-tag {
+	color: #8959a8;
+}
+
+.hljs {
+	display: block;
+	overflow-x: auto;
+	color: #4d4d4c;
+	padding: 0.5em;
+}
+
+.hljs-emphasis {
+	font-style: italic;
+}
+
+.hljs-strong {
+	font-weight: bold;
+}
+</style>
+
+<style>
+/*
+ * Markdown PDF CSS
+ */
+
+ body {
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif, "Meiryo";
+	padding: 0 12px;
+}
+
+pre {
+	background-color: #f8f8f8;
+	border: 1px solid #cccccc;
+	border-radius: 3px;
+	overflow-x: auto;
+	white-space: pre-wrap;
+	overflow-wrap: break-word;
+}
+
+pre:not(.hljs) {
+	padding: 23px;
+	line-height: 19px;
+}
+
+blockquote {
+	background: rgba(127, 127, 127, 0.1);
+	border-color: rgba(0, 122, 204, 0.5);
+}
+
+.emoji {
+	height: 1.4em;
+}
+
+code {
+	font-size: 14px;
+	line-height: 19px;
+}
+
+/* for inline code */
+:not(pre):not(.hljs) > code {
+	color: #C9AE75; /* Change the old color so it seems less like an error */
+	font-size: inherit;
+}
+
+/* Page Break : use <div class="page"/> or <div class="page"></div> to insert page break
+-------------------------------------------------------- */
+.page {
+	page-break-after: always;
+}
+
+</style>
+
+<script src="https://unpkg.com/mermaid/dist/mermaid.min.js"></script>
+</head>
+<body>
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: document.body.classList.contains('vscode-dark') || document.body.classList.contains('vscode-high-contrast')
+          ? 'dark'
+          : 'default'
+    });
+  </script>
+<p>The most useful check for each cluster is: what does the year distribution look like — is there a clear gap around the death year (two generations) or a gradual tail (wrong lifespan dates in uq)?</p>
+<p>Created [](file:///Users/rikhoekstra/develop/streamlit_worksheet/_check_cluster.py)</p>
+<p>Ran terminal command: .venv/bin/python3 _check_cluster.py 14024 16307 19809 16189 13729 16120 2&gt;/dev/null</p>
+<p>The output tells you clearly what's happening in each case — most are <strong>mixed clusters</strong> (unrelated names lumped together), not just wrong lifespan dates:</p>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>Name in uq</th>
+<th>Problem</th>
+<th>Evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>14024</strong></td>
+<td>Heinsius, Anthonie (†1720)</td>
+<td>Completely mixed — top patterns include <code>Romswinckel</code>, <code>van Slingelandt</code>, <code>Heinsius</code></td>
+<td>2245 post-death rows are unrelated delegates</td>
+</tr>
+<tr>
+<td><strong>16307</strong></td>
+<td>Rouse, Lucas Gijsbert (b.1728)</td>
+<td>2284 pre-birth rows have patterns <code>Isselmuyden</code>, <code>Vestrinck</code> — different people</td>
+<td>corrections moved those here accidentally</td>
+</tr>
+<tr>
+<td><strong>19809</strong></td>
+<td>Reede, Godart Adriaan van (†1730)</td>
+<td>992 post-death rows: patterns <code>Gevaerts</code>, <code>Harrevelt</code>, <code>van Blocklandt</code></td>
+<td>other delegates mixed in</td>
+</tr>
+<tr>
+<td><strong>16189</strong></td>
+<td>Rechteren tot Gramsbergen (†1780)</td>
+<td>970 rows in 1790s: patterns <code>Rouse</code>, <code>de Schepper</code>, <code>Jacobson</code></td>
+<td>different delegates mixed in</td>
+</tr>
+<tr>
+<td><strong>13729</strong></td>
+<td>Merens, Allard (†1716)</td>
+<td>patterns <code>de Neyn</code>, <code>Abbekerck-Crap</code> alongside <code>Meerens</code></td>
+<td>two different people merged</td>
+</tr>
+<tr>
+<td><strong>16120</strong></td>
+<td>Hoorn, Hendrik Nicolaasz. van (†1759)</td>
+<td>554 post-death rows: patterns <code>Van Palland tot Glinthuys</code>, <code>Nilant</code></td>
+<td>unrelated delegates</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Easiest way to check in the app:</strong> filter the occurrences tab for that delegate_id, sort by year, and look at the pattern column for the out-of-range rows — the foreign pattern names will tell you immediately who they belong to. Then split those rows to the correct delegate.</p>
+<p>You can also run _check_cluster.py with any id at any time:</p>
+<pre class="hljs"><code><div>.venv/bin/python3 _check_cluster.py 14024
+</div></code></pre>
+<p>Made changes.</p>
+<p>Ran terminal command: cd /Users/rikhoekstra/develop/streamlit_worksheet &amp;&amp; .venv/bin/python3 -c &quot;
+import pandas as pd</p>
+<p>baked = pd.read_parquet('delegates_18ee_w_correcties_baked.parquet')
+uq = pd.read_parquet('uq_delegates_baked_20260423.parquet')</p>
+<p>targets = [15127, 432, 19808, 17128, 14226, 13573]</p>
+<p>for tid in targets:
+sub = baked[baked['delegate_id'] == tid]
+info = uq[uq['cons_id_str'] == tid][['cons_id_str','fullname','geboortejaar','overlijdensjaar']].to_dict('records')
+print(f'\n=== {tid} {info} ===')
+viol = sub[sub['j'] &lt; sub['birth'] - 2 if 'birth' in sub.columns else sub.index.isin([])]
+# violations = outside lifespan
+birth = sub['birth'].iloc[0] if len(sub) else None
+death = sub['death'].iloc[0] if len(sub) else None
+outside = sub[(sub['j'] &lt; birth) | (sub['j'] &gt; death)] if birth and death else sub
+top = outside.groupby('pattern').size().sort_values(ascending=False).head(8)
+print(f'  birth={birth} death={death}, {len(outside)} violations')
+print(top.to_string())
+&quot; 2&gt;/dev/null</p>
+<p>Read [](file:///Users/rikhoekstra/Library/Application%20Support/Code/User/workspaceStorage/bc962666d4afbbd6f80c7b43e4c4e150/GitHub.copilot-chat/chat-session-resources/9a6054ad-737a-4f72-b74a-d54515c03d49/toolu_bdrk_015cZzu5PKmwBj7JPAxcKH9v__vscode-1777026802756/content.txt#1-1), lines 1 to 80</p>
+<p>The IDs aren't matching — likely a type mismatch. Let me check:</p>
+<p>Ran terminal command: cd /Users/rikhoekstra/develop/streamlit_worksheet &amp;&amp; .venv/bin/python3 -c &quot;
+import pandas as pd</p>
+<p>baked = pd.read_parquet('delegates_18ee_w_correcties_baked.parquet')
+uq = pd.read_parquet('uq_delegates_baked_20260423.parquet')</p>
+<p>print('baked delegate_id dtype:', baked['delegate_id'].dtype)
+print('uq cons_id_str dtype:', uq['cons_id_str'].dtype)
+print('baked delegate_id sample:', baked['delegate_id'].head(5).tolist())</p>
+<p>targets = [15127, 432, 19808, 17128, 14226, 13573]</p>
+<h1 id="try-string-match">try string match</h1>
+<p>for tid in targets:
+sub = baked[baked['delegate_id'].astype(str) == str(tid)]
+uq_row = uq[uq['cons_id_str'].astype(str) == str(tid)][['fullname','geboortejaar','overlijdensjaar']]
+if len(sub) == 0:
+print(f'{tid}: NOT FOUND in baked')
+continue
+birth = uq_row['geboortejaar'].iloc[0] if len(uq_row) else None
+death = uq_row['overlijdensjaar'].iloc[0] if len(uq_row) else None
+fname = uq_row['fullname'].iloc[0] if len(uq_row) else '?'
+outside = sub[(sub['j'] &lt; birth) | (sub['j'] &gt; death)] if birth and death else sub
+top = outside.groupby('pattern').size().sort_values(ascending=False).head(6)
+print(f'\n=== {tid} {fname} birth={birth} death={death} ({len(outside)} viols) ===')
+print(top.to_string())
+&quot; 2&gt;/dev/null</p>
+<p>Read [](file:///Users/rikhoekstra/Library/Application%20Support/Code/User/workspaceStorage/bc962666d4afbbd6f80c7b43e4c4e150/GitHub.copilot-chat/chat-session-resources/9a6054ad-737a-4f72-b74a-d54515c03d49/toolu_bdrk_01UnBZZ1fHJ85cn912rTiJse__vscode-1777026802758/content.txt)</p>
+<p>Now let me look up the correct target delegates for each in uq:</p>
+<p>Ran terminal command: cd /Users/rikhoekstra/develop/streamlit_worksheet &amp;&amp; .venv/bin/python3 -c &quot;
+import pandas as pd
+uq = pd.read_parquet('uq_delegates_baked_20260423.parquet')</p>
+<h1 id="search-for-correct-delegates-by-surname">Search for correct delegates by surname</h1>
+<p>searches = {
+'Wassenaer Starrenburg': 'wassenaer',
+'Steyn': 'steyn',
+'Essenius/van Essen (early)': 'essen',
+'Heeckeren (early, pre-1742)': 'heeckeren',
+'Iddekinge (post-1719)': 'iddekinge',
+'Pesters': 'pesters',
+'Bleyswijk (late, 1779)': 'bleyswijk|bleyswijck',
+}</p>
+<p>for label, term in searches.items():
+hits = uq[uq['fullname'].str.lower().str.contains(term, na=False)][['cons_id_str','fullname','geboortejaar','overlijdensjaar']]
+print(f'\n--- {label} ---')
+print(hits.to_string())
+&quot; 2&gt;/dev/null</p>
+<p>Now let me also check for Lestevenon (later), Parvé/Santheuvel, and look at what years the violations are by year for 19808:</p>
+<p>Ran terminal command: cd /Users/rikhoekstra/develop/streamlit_worksheet &amp;&amp; .venv/bin/python3 -c &quot;
+import pandas as pd
+uq = pd.read_parquet('uq_delegates_baked_20260423.parquet')</p>
+<h1 id="additional-lookups">Additional lookups</h1>
+<p>for term in ['lestevenon', 'parve|santheuvel', 'pesters']:
+hits = uq[uq['fullname'].str.lower().str.contains(term, na=False)][['cons_id_str','fullname','geboortejaar','overlijdensjaar']]
+print(f'\n--- {term} ---')
+print(hits.to_string())</p>
+<h1 id="heeckeren-violations-year-range">Heeckeren violations year range</h1>
+<p>baked = pd.read_parquet('delegates_18ee_w_correcties_baked.parquet')
+h = baked[baked['delegate_id'].astype(str) == '19808']
+birth, death = 1742, 1796
+outside = h[(h['j'] &lt; birth) | (h['j'] &gt; death)]
+print('\n--- 19808 violation years ---')
+print(outside.groupby('j').size().sort_index().to_string())
+&quot; 2&gt;/dev/null</p>
+<p>Here's the full diagnosis for each:</p>
+<table>
+<thead>
+<tr>
+<th>delegate_id</th>
+<th>name (wrong lifespan)</th>
+<th>top violation pattern</th>
+<th>→ correct delegate</th>
+<th>ID</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>15127</strong></td>
+<td>Wassenaer, Carel Lodewijk (†1751, viols 1754-1795)</td>
+<td>&quot;Van Wassenaer&quot; (1517)</td>
+<td>Wassenaer Obdam, Carel George van (1733-1800)</td>
+<td>12372</td>
+</tr>
+<tr>
+<td></td>
+<td></td>
+<td>&quot;Steyn&quot; (1474)</td>
+<td>Steyn, Pieter (1706-1772)</td>
+<td><strong>13568</strong></td>
+</tr>
+<tr>
+<td></td>
+<td></td>
+<td>&quot;Van Wassenaer Starrenburg&quot; (540)</td>
+<td>Wassenaer, Willem Lodewijk Starrenburg (1744-1833)</td>
+<td><strong>13555</strong></td>
+</tr>
+<tr>
+<td></td>
+<td></td>
+<td>&quot;Parvé/Santheuvel&quot; (473)</td>
+<td>Santheuvel, Bartholomeus van den (1730-1784)</td>
+<td><strong>13563</strong></td>
+</tr>
+<tr>
+<td></td>
+<td></td>
+<td>&quot;Bleyswijck&quot; (411)</td>
+<td>Bleyswijk, Pieter van (1724-1790)</td>
+<td><strong>14029</strong></td>
+</tr>
+<tr>
+<td><strong>432</strong></td>
+<td>Essenius, Samuel (born 1755, viols 1705-1752)</td>
+<td>&quot;van Essen/Essenius&quot; (3243)</td>
+<td>Essenius, Leonard (1676-1748)</td>
+<td><strong>16932</strong></td>
+</tr>
+<tr>
+<td><strong>19808</strong></td>
+<td>Heeckeren van Brantsenburg (born 1742, viols 1705-1740)</td>
+<td>&quot;van Heeckeren van Brantsenburg&quot; (1317)</td>
+<td>Heeckeren tot den Brantsenburg, Walraven Robbert van (1704-1758)</td>
+<td><strong>17295</strong></td>
+</tr>
+<tr>
+<td><strong>17128</strong></td>
+<td>Iddekinge, Rembt (†1719, viols 1720-1747)</td>
+<td>&quot;Iddekinge&quot; (1314)</td>
+<td>Iddekinge, Tobias Jan van (1689-1759)</td>
+<td><strong>17965</strong></td>
+</tr>
+<tr>
+<td><strong>14226</strong></td>
+<td>Lestevenon, Daniel (†1736, viols 1737-1795)</td>
+<td>&quot;Pesters&quot; (720)</td>
+<td>Pesters, Balthasar Constantijn (1731-1822)</td>
+<td><strong>19203</strong></td>
+</tr>
+<tr>
+<td></td>
+<td></td>
+<td>&quot;van Citters&quot; (567)</td>
+<td>(already known → 14076/15995)</td>
+<td></td>
+</tr>
+<tr>
+<td></td>
+<td></td>
+<td>&quot;Groeninx/Lestevenon&quot; (280)</td>
+<td>Lestevenon, Willem Anne (1750-1816)</td>
+<td><strong>13998</strong></td>
+</tr>
+<tr>
+<td><strong>13573</strong></td>
+<td>Bleyswijk, Hendrik (†1703, viols 1779-1787)</td>
+<td>&quot;Bleyswijck&quot; (1157)</td>
+<td>Bleyswijk, Pieter van (1724-1790)</td>
+<td><strong>14029</strong></td>
+</tr>
+</tbody>
+</table>
+<p>These can all be fixed in the app by selecting the pattern and reassigning to the target ID. Want me to help with anything specific, like checking Bentinck or the &quot;Pesters&quot; year split?</p>
+
+</body>
+</html>

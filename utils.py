@@ -99,7 +99,21 @@ def _manifest_path(section: str, key: str) -> Path | None:
 
 
 # Persons (unique delegates)
-PERSONS_CANDIDATES: list[Path] = [
+# Prefer the latest baked uq parquet (most complete); fall back to xlsx.
+def _latest_uq_baked() -> Path | None:
+    """Return the most recent uq_delegates_baked_YYYYMMDD.parquet, or None."""
+    import re
+    candidates = sorted(
+        [p for p in _WS.glob("uq_delegates_baked_*.parquet")
+         if re.fullmatch(r"uq_delegates_baked_\d{8}\.parquet", p.name)],
+        reverse=True,
+    )
+    return candidates[0] if candidates else None
+
+_latest_uq = _latest_uq_baked()
+PERSONS_CANDIDATES: list[Path] = (
+    [_latest_uq] if _latest_uq else []
+) + [
     _WS / "uq_delegates_updated_20260225.xlsx",
     BASEDIR / "output" / "uq_delegates_updated_20260225.xlsx",
     BASEDIR / "uq_delegates_updated_20260225.xlsx",
@@ -112,15 +126,22 @@ PERSONS_CANDIDATES: list[Path] = [
 OCCURRENCES_OUTPUT: Path = _WS / "delegates_18ee_w_correcties_baked.parquet"
 
 def _occurrences_candidates() -> list[Path]:
-    candidates: list[Path] = [OCCURRENCES_OUTPUT]
-    manifest_baked = _manifest_path("1705_1795", "occurrences_baked")
-    if manifest_baked is not None and manifest_baked not in candidates:
-        candidates.append(manifest_baked)
-    candidates += [
+    # Raw source files come FIRST so build_merged always works from raw
+    # occurrences — never from an already-merged baked parquet.
+    # The baked parquet is the OUTPUT of the pipeline; feeding it back as
+    # INPUT causes build_merged to re-merge already-merged person columns,
+    # creating _p-suffix duplicates and silently losing rows on each cycle.
+    # It is listed LAST here as a fallback only (e.g. when the raw Excel has
+    # been archived away).
+    candidates: list[Path] = [
         _WS / "delegates_18ee_w_correcties_20260123_marked.xlsx",
         BASEDIR / "output" / "delegates_18ee_w_correcties_20260123_marked.xlsx",
         BASEDIR / "delegates_18ee_w_correcties_20260123_marked.xlsx",
     ]
+    manifest_baked = _manifest_path("1705_1795", "occurrences_baked")
+    if manifest_baked is not None and manifest_baked not in candidates:
+        candidates.append(manifest_baked)
+    candidates.append(OCCURRENCES_OUTPUT)  # fallback: baked parquet last
     return candidates
 
 OCCURRENCES_CANDIDATES: list[Path] = _occurrences_candidates()
@@ -163,6 +184,7 @@ def source_mtimes() -> tuple[float, ...]:
 # Persistence files
 CORRECTIONS_FILE        = _WS / "corrections.json"
 STAGED_CORRECTIONS_FILE   = _WS / "staged_corrections.json"
+STAGED_SPLITS_FILE        = _WS / "staged_splits.json"
 APPROVED_CORRECTIONS_FILE = _WS / "approved_corrections.json"
 NEW_DELEGATES_FILE        = _WS / "new_delegates.json"
 MERGE_DISMISSALS_FILE     = _WS / "merge_dismissals.json"
@@ -291,6 +313,51 @@ def save_staged_corrections(corrections: dict) -> None:
     )
 
 
+def load_staged_splits() -> dict:
+    """Return {row_index (int): {left_id, right_id}} for concat-split corrections.
+
+    left_id may be None (meaning: keep the original row's delegate_id unchanged).
+    right_id is the delegate_id for the newly duplicated row.
+    """
+    if STAGED_SPLITS_FILE.exists():
+        try:
+            raw = json.loads(STAGED_SPLITS_FILE.read_text())
+            return {int(k): v for k, v in raw.items()}
+        except Exception:
+            return {}
+    return {}
+
+
+def save_staged_splits(splits: dict) -> None:
+    STAGED_SPLITS_FILE.write_text(
+        json.dumps({str(k): v for k, v in sorted(splits.items())},
+                   ensure_ascii=False, indent=2)
+    )
+
+
+def apply_splits(df: pd.DataFrame, splits: dict) -> pd.DataFrame:
+    """Apply concat-split corrections: remap left_id on original row and
+    append a duplicate row with right_id.  Only touches rows in df.index."""
+    if not splits:
+        return df
+    out = df.copy()
+    new_rows = []
+    for ridx, entry in splits.items():
+        if ridx not in out.index:
+            continue
+        left_id  = entry.get("left_id")
+        right_id = entry.get("right_id")
+        if left_id:
+            out.loc[ridx, "delegate_id"] = str(left_id)
+        if right_id:
+            dup = out.loc[ridx].copy()
+            dup["delegate_id"] = str(right_id)
+            new_rows.append(dup)
+    if new_rows:
+        out = pd.concat([out, pd.DataFrame(new_rows)], ignore_index=True)
+    return out
+
+
 def load_approved_corrections() -> dict:
     if APPROVED_CORRECTIONS_FILE.exists():
         try:
@@ -367,11 +434,127 @@ def save_reviewed(reviewed: set[str]) -> None:
     REVIEWED_FILE.write_text(json.dumps(sorted(set(reviewed)), indent=2))
 
 
-def apply_corrections(df: pd.DataFrame, corrections: dict, config: dict | None = None) -> pd.DataFrame:
+# ---------------------------------------------------------------------------
+# PERSON COLUMN INVARIANT
+# ---------------------------------------------------------------------------
+# Columns that are derived from the persons table (df_p / uq).  After any
+# operation that changes delegate_id these must be re-synced from df_p so
+# that fullname, birth/death years etc. are always consistent with the id.
+# This is the *single source of truth* — add new person columns here only.
+PERSON_COLS: tuple[str, ...] = (
+    "fullname",
+    "voornaam",
+    "tussenvoegsel",
+    "geslachtsnaam",
+    "geboortejaar",
+    "overlijdensjaar",
+    "provincie",
+    "resolutie_refs",
+    "minjaar",
+    "maxjaar",
+    "heerlijkheid",
+)
+
+
+def _normalise_id_str(series: pd.Series) -> pd.Series:
+    """Canonicalise a delegate-id series to clean integer strings.
+
+    Handles all forms that appear in practice:
+    - Already clean strings: '13231'  → '13231'
+    - Float strings:         '13231.0' → '13231'
+    - Pandas NA / numpy nan → kept as pd.NA (excluded from joins)
+    - Int64 nullable int    → '13231'
+    - Literal '<NA>'        → pd.NA
+
+    Always returns an object-dtype Series with no '13231.0' or '<NA>' strings.
+    """
+    s = series.astype(str).str.strip()
+    # Replace every representation of missing with pd.NA
+    s = s.replace({"nan": pd.NA, "<NA>": pd.NA, "None": pd.NA, "": pd.NA})
+    # Drop spurious .0 suffix that appears when floats are cast to str
+    mask = s.notna() & s.str.endswith(".0")
+    s.loc[mask] = s.loc[mask].str[:-2]
+    return s
+
+
+def _resolve_persons_id_col(df_p: pd.DataFrame) -> str | None:
+    """Return the column in *df_p* that holds the canonical delegate id.
+
+    Different sources use different column names:
+    - Excel persons file (uq_delegates_updated_…)  → 'delegate_id'
+    - Baked uq parquet  (uq_delegates_baked_…)     → 'cons_id_str'
+
+    Returns None if neither is found, so callers can bail gracefully.
+    """
+    for candidate in ("delegate_id", "cons_id_str"):
+        if candidate in df_p.columns:
+            return candidate
+    return None
+
+
+def refresh_person_columns(
+    df: pd.DataFrame,
+    df_p: pd.DataFrame,
+    id_col: str = "delegate_id",
+    p_id_col: str | None = None,
+) -> pd.DataFrame:
+    """Replace every PERSON_COLS column in *df* with values from *df_p*.
+
+    Looks up each row's *id_col* against the canonical id column of *df_p*
+    (auto-detected via _resolve_persons_id_col: tries 'delegate_id' then
+    'cons_id_str').  Overwrites all PERSON_COLS present in df_p.  Rows whose
+    id is not found keep NaN.  Always returns a new DataFrame.
+
+    INVARIANT: after this call, every row's person columns are consistent with
+    its delegate_id.  Call after any operation that changes delegate_id.
+    """
+    if p_id_col is None:
+        p_id_col = _resolve_persons_id_col(df_p)
+    if p_id_col is None:
+        raise ValueError(
+            "refresh_person_columns: df_p has neither 'delegate_id' nor "
+            "'cons_id_str' column — cannot resolve person lookup key."
+        )
+    cols_present = [c for c in PERSON_COLS if c in df_p.columns]
+    if not cols_present:
+        return df
+    lookup = (
+        df_p[[p_id_col] + cols_present]
+        .drop_duplicates(subset=[p_id_col])
+        .copy()
+    )
+    lookup[p_id_col] = _normalise_id_str(lookup[p_id_col])
+    lookup = lookup.dropna(subset=[p_id_col])  # rows with no id can't be joined
+    # Strip whitespace from string columns so baked output is clean
+    for _c in cols_present:
+        if lookup[_c].dtype == object:
+            lookup[_c] = lookup[_c].str.strip()
+    out = df.copy()
+    out[id_col] = _normalise_id_str(out[id_col])
+    # Drop stale person columns before merge so we never get _x/_y suffixes
+    out = out.drop(columns=[c for c in cols_present if c in out.columns])
+    out = out.merge(
+        lookup.rename(columns={p_id_col: id_col}),
+        on=id_col,
+        how="left",
+    )
+    return out
+
+
+def apply_corrections(
+    df: pd.DataFrame,
+    corrections: dict,
+    config: dict | None = None,
+    df_p: pd.DataFrame | None = None,
+) -> pd.DataFrame:
     """Return a copy of *df* with all staged corrections applied.
 
     Only touches rows that exist in the index — silently skips stale keys.
     Does NOT modify the cached df_merged in place.
+
+    If *df_p* is supplied, person columns (PERSON_COLS) are automatically
+    re-synced from *df_p* after delegate_id changes, enforcing the invariant
+    that person columns are always consistent with delegate_id.
     """
     if not corrections:
         return df
@@ -393,6 +576,8 @@ def apply_corrections(df: pd.DataFrame, corrections: dict, config: dict | None =
         if col_dtype == object or str(col_dtype) == "string":
             new_vals = [str(v) for v in new_vals]
         out.loc[idxs, "delegate_id"] = new_vals
+    if df_p is not None:
+        out = refresh_person_columns(out, df_p)
     return out
 
 
@@ -1044,6 +1229,14 @@ def build_merged(
                 act_df[c] = pd.to_numeric(act_df[c], errors="coerce")
             persons = persons.merge(act_df, on="delegate_id", how="left")
 
+    # Fall back to geboortejaar/overlijdensjaar already in persons (from uq)
+    # before giving up and setting NA. This covers the common case where df_bio
+    # doesn't have these columns but the uq parquet does.
+    if "birth_year" not in persons.columns and "geboortejaar" in persons.columns:
+        persons["birth_year"] = pd.to_numeric(persons["geboortejaar"], errors="coerce")
+    if "death_year" not in persons.columns and "overlijdensjaar" in persons.columns:
+        persons["death_year"] = pd.to_numeric(persons["overlijdensjaar"], errors="coerce")
+
     for col in ("birth_year", "death_year"):
         if col not in persons.columns:
             persons[col] = pd.NA
@@ -1113,6 +1306,11 @@ def build_merged(
         persons = persons[~persons["delegate_id"].str.lower().isin(_null_ids)]
     if "delegate_id" in df_i.columns:
         df_i = df_i[~df_i["delegate_id"].str.lower().isin(_null_ids)]
+
+    # Drop stale birth_year/death_year from occurrences — these are person
+    # attributes and must come from the persons table, not from a cached copy
+    # in the occurrences parquet that may be out of date after corrections.
+    df_i = df_i.drop(columns=[c for c in ("birth_year", "death_year") if c in df_i.columns])
 
     df = df_i.merge(persons, on="delegate_id", how="left", suffixes=("", "_p"))
 
@@ -1748,7 +1946,7 @@ def query_suggestions(
     last_years = pd.to_numeric(meta["last_year"], errors="coerce").to_numpy()
     provs = meta["provincie"].fillna("").to_numpy()
 
-    patterns = query_df["pattern"].fillna("").astype(str).tolist()
+    patterns = query_df["pattern"].astype(object).fillna("").astype(str).tolist()
 
     # Combined score: 60% character n-gram + 40% word subtoken
     sim_char = cosine_similarity(vec_char.transform(patterns), key_char)
